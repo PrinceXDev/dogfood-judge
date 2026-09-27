@@ -1,0 +1,7 @@
+.git
+data
+docs
+tests
+*.db
+*.db-*
+acceptance-report.txt

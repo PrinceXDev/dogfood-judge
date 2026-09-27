@@ -1,0 +1,23 @@
+{{define "content"}}
+<p class="small"><a href="/events/{{.Event.Slug}}">← {{.Event.Name}}</a></p>
+<h1>Community vote</h1>
+{{if not .Ballot.Open}}<p class="warnbox">Voting is not open.</p>{{end}}
+<p>You have <b>{{.Ballot.Remaining}}</b> of {{.Event.VotesPerVoter}} votes left.{{if .Ballot.ClosesAt}} Voting closes {{date .Ballot.ClosesAt}}.{{end}}
+  The order below is shuffled for you, so no project benefits from being listed first. Tallies are hidden until results are published.</p>
+<div class="grid">
+{{range .Ballot.Projects}}
+  <article class="card project">
+    <h3><a href="/p/{{.ID}}">{{.Title}}</a></h3>
+    <p class="muted small">{{.TeamName}}{{if .TrackName}} · <span class="tag">{{.TrackName}}</span>{{end}}</p>
+    {{if $.Ballot.Open}}
+    <form method="post" action="/p/{{.ID}}/vote">
+      {{template "csrf" $.CSRF}}
+      <input type="hidden" name="next" value="/events/{{$.Event.Slug}}/ballot">
+      {{if index $.Voted .ID}}<input type="hidden" name="action" value="unvote"><button class="secondary small">✓ Voted · withdraw</button>
+      {{else if gt $.Ballot.Remaining 0}}<button class="small">Vote</button>{{end}}
+    </form>
+    {{end}}
+  </article>
+{{end}}
+</div>
+{{end}}

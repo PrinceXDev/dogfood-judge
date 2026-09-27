@@ -1,0 +1,48 @@
+{{define "content"}}
+<p class="small"><a href="/events/{{.Event.Slug}}/projects">← {{.Event.Name}} projects</a></p>
+<h1>{{.Project.Title}}</h1>
+<p class="muted">{{.Project.TeamName}}{{if .Project.TrackName}} · <span class="tag">{{.Project.TrackName}}</span>{{end}}
+  {{if eq .Project.Status "draft"}}<span class="tag warn">draft, only your team and organizers see this</span>{{end}}
+  {{if .Project.DuplicateOf}}<span class="tag bad">duplicate of <a href="/p/{{.Project.DuplicateOf}}">{{.Project.DuplicateOf}}</a></span>{{end}}
+  {{if .Project.DisqualifiedReason}}<span class="tag bad">disqualified: {{.Project.DisqualifiedReason}}</span>{{end}}</p>
+<div class="cols">
+<section>
+  {{if .Project.Summary}}<p><b>{{.Project.Summary}}</b></p>{{end}}
+  {{if .Project.Description}}<pre class="desc">{{.Project.Description}}</pre>{{end}}
+  <p>{{if .Project.RepoURL}}<a href="{{.Project.RepoURL}}" rel="noopener nofollow">Repository</a>{{end}}
+     {{if .Project.DemoURL}} · <a href="{{.Project.DemoURL}}" rel="noopener nofollow">Demo</a>{{end}}</p>
+  {{if .Project.SubmittedAt}}<p class="small muted">Submitted {{date .Project.SubmittedAt}} · last edited {{date .Project.UpdatedAt}}</p>{{end}}
+
+  <h2 id="comments">Comments</h2>
+  {{range .Comments}}
+    <div class="card">
+      <p class="small muted"><b>{{.UserName}}</b> · {{ago .CreatedAt}}{{if .Hidden}} · <span class="tag bad">hidden</span>{{end}}</p>
+      <p>{{.Body}}</p>
+    </div>
+  {{else}}<p class="muted">No comments yet.</p>{{end}}
+  {{if .Me}}{{if eq .Project.Status "submitted"}}
+    <form method="post" action="/p/{{.Project.ID}}/comments" class="stack">
+      {{template "csrf" .CSRF}}
+      <label>Add a comment<textarea name="body" maxlength="2000" required></textarea></label>
+      <div><button>Post comment</button></div>
+    </form>
+  {{end}}{{else}}<p><a href="/login?next=/p/{{.Project.ID}}">Sign in</a> to comment.</p>{{end}}
+</section>
+<aside>
+  {{if .VotingOpen}}
+  <div class="card">
+    <h3>Community vote</h3>
+    {{if .Me}}
+      <form method="post" action="/p/{{.Project.ID}}/vote">
+        {{template "csrf" .CSRF}}
+        {{if .Voted}}<input type="hidden" name="action" value="unvote"><button class="secondary">Withdraw vote</button>
+        {{else}}<button>Vote for this project</button>{{end}}
+      </form>
+      <p class="small muted">{{.Remaining}} vote(s) left. Tallies stay hidden until results are published.</p>
+    {{else}}<p><a href="/login?next=/p/{{.Project.ID}}">Sign in</a> to vote.</p>{{end}}
+  </div>
+  {{end}}
+  {{if .Roles.organizer}}<div class="card"><h3>Organizer</h3><p class="small"><a href="/organize/{{.Event.Slug}}/moderation">Moderate</a></p></div>{{end}}
+</aside>
+</div>
+{{end}}

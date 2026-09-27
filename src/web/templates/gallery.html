@@ -1,0 +1,36 @@
+{{define "content"}}
+{{if .Event}}
+  <p class="small"><a href="/events/{{.Event.Slug}}">← {{.Event.Name}}</a></p>
+  <h1>{{.Event.Name}}: projects</h1>
+{{else}}
+  <h1>Gallery</h1>
+{{end}}
+<form method="get" class="row" role="search">
+  <label>Search<input type="search" name="q" value="{{.Filter.Query}}" placeholder="title, team, summary, track"></label>
+  {{if .Event}}
+    {{if .Event.Tracks}}
+    <label>Track<select name="track">
+      <option value="">All tracks</option>
+      {{range .Event.Tracks}}<option value="{{.ID}}"{{if eq .ID $.Filter.TrackID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select></label>
+    {{end}}
+  {{else if .Events}}
+    <label>Event<select name="event">
+      <option value="">All events</option>
+      {{range .Events}}<option value="{{.Slug}}"{{if eq .Slug $.Filter.EventID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select></label>
+  {{end}}
+  <div><button>Filter</button></div>
+</form>
+<p class="muted small">{{.Page.Total}} project{{if ne .Page.Total 1}}s{{end}}{{if .Filter.Query}} matching “{{.Filter.Query}}”{{end}}.</p>
+<div class="grid">
+{{range .Page.Projects}}{{template "projectcard" .}}{{end}}
+</div>
+{{if gt .Pages 1}}
+<nav class="pager">
+  {{if .HasPrev}}<a href="?q={{.Filter.Query}}&track={{.Filter.TrackID}}&page={{add .Page.Page -1}}">← Previous</a>{{end}}
+  <span class="muted">Page {{.Page.Page}} of {{.Pages}}</span>
+  {{if .HasNext}}<a href="?q={{.Filter.Query}}&track={{.Filter.TrackID}}&page={{add .Page.Page 1}}">Next →</a>{{end}}
+</nav>
+{{end}}
+{{end}}

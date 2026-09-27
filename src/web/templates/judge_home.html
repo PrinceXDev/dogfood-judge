@@ -1,0 +1,28 @@
+{{define "content"}}
+<h1>Judging</h1>
+{{if not .Groups}}<p class="muted">You have no assignments. An organizer invites judges and runs the assignment engine.</p>{{end}}
+{{range .Groups}}
+  <h2>{{.EventName}}</h2>
+  {{$total := add (len .Pending) (len .Done)}}
+  <p>{{len .Done}} of {{$total}} reviews done
+    {{if .JudgingOpen}} · <a href="/judge/{{.EventSlug}}/pairwise">Pairwise mode</a>{{else}} · <span class="tag">judging closed</span>{{end}}
+    {{if .Published}} · <a href="/judge/{{.EventSlug}}/record">Your signed record</a>{{end}}</p>
+  <div class="progress"><i style="width: {{percent (len .Done) $total}}%"></i></div>
+  <p class="small muted">You only ever see your own scores. Other judges' scores are not available to you, in the pages or the API.</p>
+  {{if .Pending}}
+  <h3>To review</h3>
+  <table><thead><tr><th>Project</th><th>Track</th><th>Why you</th><th></th></tr></thead><tbody>
+  {{range .Pending}}<tr><td>{{.Project.Title}}</td><td>{{.Project.TrackName}}</td><td class="small muted">{{.Reason}}</td>
+    <td>{{if $.Me}}<a class="btn small" href="/judge/{{.EventSlug}}/p/{{.Project.ID}}">Review</a>{{end}}</td></tr>{{end}}
+  </tbody></table>
+  {{end}}
+  {{if .Done}}
+  <h3>Done</h3>
+  <table><thead><tr><th>Project</th><th class="num">Your weighted score</th><th>Updated</th><th></th></tr></thead><tbody>
+  {{range .Done}}<tr><td>{{.Project.Title}}</td><td class="num">{{if .Review}}{{f2 .Review.Composite}}{{end}}</td>
+    <td class="small">{{if .Review}}{{ago .Review.UpdatedAt}}{{end}}</td>
+    <td><a href="/judge/{{.EventSlug}}/p/{{.Project.ID}}">Edit</a></td></tr>{{end}}
+  </tbody></table>
+  {{end}}
+{{end}}
+{{end}}

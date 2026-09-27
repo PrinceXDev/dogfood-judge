@@ -1,0 +1,22 @@
+# docker compose up  ->  http://localhost:8080, seeded with the DOGFOOD fixtures.
+# No cloud accounts, no hosted database, no external APIs: one container, one
+# SQLite file in a named volume. `docker compose down -v` resets to a fresh seed.
+services:
+  dogfood:
+    build: .
+    image: dogfood:local
+    ports:
+      - "8080:8080"
+    volumes:
+      - dogfood-data:/data
+    environment:
+      # Demo mode installs known passwords and API tokens (see README). Set to 0 for a real event.
+      DOGFOOD_DEMO: "1"
+      # Set when serving behind HTTPS / a reverse proxy you control:
+      # DOGFOOD_PUBLIC_URL: "https://judge.example.org"
+      # DOGFOOD_SECURE_COOKIES: "1"
+      # DOGFOOD_TRUST_PROXY: "1"
+    restart: unless-stopped
+
+volumes:
+  dogfood-data:
