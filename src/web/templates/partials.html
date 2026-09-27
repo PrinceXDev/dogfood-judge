@@ -1,0 +1,20 @@
+{{define "projectcard"}}
+<article class="card project">
+  <h3><a href="/p/{{.ID}}">{{.Title}}</a></h3>
+  <p class="muted small">{{.TeamName}}{{if .TrackName}} · <span class="tag">{{.TrackName}}</span>{{end}}</p>
+  {{if .Summary}}<p>{{truncate 140 .Summary}}</p>{{end}}
+</article>
+{{end}}
+
+{{define "eventnav"}}
+<nav class="subnav">
+  <a href="/organize/{{.Slug}}">Dashboard</a>
+  <a href="/organize/{{.Slug}}/results">Results</a>
+  <a href="/organize/{{.Slug}}/settings">Settings</a>
+  <a href="/organize/{{.Slug}}/moderation">Moderation</a>
+  <a href="/organize/{{.Slug}}/audit">Audit log</a>
+  <a href="/events/{{.Slug}}">Public page</a>
+</nav>
+{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}

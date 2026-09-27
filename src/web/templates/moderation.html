@@ -1,0 +1,53 @@
+{{define "content"}}
+<h1>{{.Event.Name}}</h1>
+{{template "eventnav" .Event}}
+
+<h2>Possible duplicate submissions</h2>
+<p class="small muted">Pairs sharing a normalised title or repository URL. The earlier submission is treated as the original.</p>
+{{range .Dups}}
+  {{$o := index . 0}}{{$d := index . 1}}
+  <div class="card">
+    <p><b>{{$d.Title}}</b> <span class="mono small">{{$d.ID}}</span> ({{$d.TeamName}}, submitted {{date $d.SubmittedAt}})<br>
+       looks like <b>{{$o.Title}}</b> <span class="mono small">{{$o.ID}}</span> ({{$o.TeamName}}, submitted {{date $o.SubmittedAt}})</p>
+    {{if eq $d.DuplicateOf $o.ID}}<p><span class="tag bad">marked duplicate</span></p>
+    {{else}}
+    <form method="post" action="/organize/{{$.Event.Slug}}/duplicate" class="inline">{{template "csrf" $.CSRF}}
+      <input type="hidden" name="project" value="{{$d.ID}}"><input type="hidden" name="of" value="{{$o.ID}}"><button class="small">Mark as duplicate</button></form>
+    {{end}}
+  </div>
+{{else}}<p class="muted">None found.</p>{{end}}
+
+<h2>Excluded projects</h2>
+{{range .Flagged}}
+  <p>{{.Title}} <span class="mono small">{{.ID}}</span> ·
+    {{if .DuplicateOf}}duplicate of <span class="mono">{{.DuplicateOf}}</span>{{end}}{{if .DisqualifiedReason}} disqualified: {{.DisqualifiedReason}}{{end}}
+    <form method="post" action="/organize/{{$.Event.Slug}}/duplicate" class="inline">{{template "csrf" $.CSRF}}
+      <input type="hidden" name="project" value="{{.ID}}"><input type="hidden" name="action" value="reinstate"><button class="link small">reinstate</button></form></p>
+{{else}}<p class="muted">None.</p>{{end}}
+<details><summary class="small">Disqualify a project</summary>
+<form method="post" action="/organize/{{.Event.Slug}}/duplicate" class="stack">
+  {{template "csrf" .CSRF}}<input type="hidden" name="action" value="disqualify">
+  <label>Project<select name="project">{{range .Projects}}<option value="{{.ID}}">{{.Title}} ({{.ID}})</option>{{end}}</select></label>
+  <label>Reason<input type="text" name="reason" required></label>
+  <div><button class="danger small">Disqualify</button></div>
+</form></details>
+
+<h2 id="votes">Held votes</h2>
+<p class="small muted">Votes flagged by the anti-abuse rules are held out of the tally until you decide. Grouped by network (hashed IP).</p>
+{{if .Votes}}
+<table><thead><tr><th>Voter</th><th>Project</th><th>Network</th><th>Reason</th><th></th></tr></thead><tbody>
+{{range .Votes}}<tr><td>{{.UserName}}</td><td>{{.Title}}</td><td class="mono small">{{.IPHash}}</td><td class="small">{{.Reason}}</td>
+  <td><form method="post" action="/organize/{{$.Event.Slug}}/votes" class="inline">{{template "csrf" $.CSRF}}
+    <input type="hidden" name="user" value="{{.UserID}}"><input type="hidden" name="project" value="{{.ProjectID}}">
+    <button name="approve" value="1" class="small">Count</button> <button name="approve" value="0" class="danger small">Discard</button></form></td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">No held votes.</p>{{end}}
+
+<h2 id="comments">Recent comments</h2>
+{{range .Comments}}
+  <div class="card"><p class="small muted"><b>{{.UserName}}</b> on <a href="/p/{{.ProjectID}}">{{.ProjectID}}</a> · {{ago .CreatedAt}}{{if .Hidden}} · <span class="tag bad">hidden</span>{{end}}</p>
+  <p>{{.Body}}</p>
+  <form method="post" action="/organize/{{$.Event.Slug}}/comments/{{.ID}}" class="inline">{{template "csrf" $.CSRF}}
+    {{if .Hidden}}<input type="hidden" name="hide" value="0"><button class="link small">unhide</button>{{else}}<input type="hidden" name="hide" value="1"><button class="link small">hide</button>{{end}}</form></div>
+{{else}}<p class="muted">No comments.</p>{{end}}
+{{end}}

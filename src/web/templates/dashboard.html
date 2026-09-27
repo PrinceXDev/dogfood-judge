@@ -1,0 +1,71 @@
+{{define "content"}}
+<h1>{{.Event.Name}}</h1>
+{{template "eventnav" .Event}}
+{{if .AssignSummary}}<p class="notice">{{.AssignSummary}}</p>{{end}}
+<div data-progress-url="/api/v1/events/{{.Event.ID}}/progress">
+  <p><span class="tag">{{.Phase}}</span> <span class="small muted">Live · updated <span data-live="updated">now</span></span></p>
+  <div class="stats">
+    <div class="stat"><b data-live="projects">{{.P.Projects}}</b><span>submitted projects ({{.P.Drafts}} drafts)</span></div>
+    <div class="stat"><b><span data-live="done">{{.P.Done}}</span>/<span data-live="assignments">{{.P.Assignments}}</span></b><span>reviews done</span></div>
+    <div class="stat"><b data-live="percent">{{printf "%.0f" .P.Percent}}%</b><span>judging complete</span></div>
+    <div class="stat"><b data-live="fully">{{.P.FullyReviewed}}</b><span>projects with {{.Event.ReviewsPerProject}}+ reviews</span></div>
+    <div class="stat"><b data-live="comparisons">{{.P.Comparisons}}</b><span>pairwise comparisons</span></div>
+    <div class="stat"><b data-live="votes">{{.P.Votes}}</b><span>community votes{{if .P.FlaggedVotes}} ({{.P.FlaggedVotes}} held){{end}}</span></div>
+  </div>
+  <div class="progress"><i data-live-bar style="width: {{printf "%.0f" .P.Percent}}%"></i></div>
+</div>
+
+<div class="cols">
+<section>
+  <h2 id="judges">Judges</h2>
+  {{if .P.Unassigned}}<p class="warnbox">{{.P.Unassigned}} project(s) have fewer than {{.Event.ReviewsPerProject}} reviewers assigned.</p>{{end}}
+  <form method="post" action="/organize/{{.Event.Slug}}/assign" class="row">
+    {{template "csrf" .CSRF}}
+    <div><button>Run assignment engine</button></div>
+    <p class="small muted">Tops every project up to {{.Event.ReviewsPerProject}} reviewers: matching track, no conflicts, balanced load, and connecting judge groups so scores can be normalized. Never removes existing work.</p>
+  </form>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Judge</th><th>Tracks</th><th>Progress</th><th class="num">Done</th><th></th></tr></thead>
+    <tbody>
+    {{range .Judges}}
+      <tr data-judge="{{.User.ID}}">
+        <td>{{.User.Name}}<br><span class="small muted">{{.User.Email}}</span></td>
+        <td class="small">{{join .TrackNames ", "}}</td>
+        <td><div class="progress"><i data-j-bar style="width: {{percent .Done .Assigned}}%"></i></div></td>
+        <td class="num" data-j-done>{{.Done}} / {{.Assigned}}</td>
+        <td>{{if not .CanLogin}}
+          <form method="post" action="/organize/{{$.Event.Slug}}/activation" class="inline">{{template "csrf" $.CSRF}}
+            <input type="hidden" name="user" value="{{.User.ID}}"><button class="link small">Activation link</button></form>{{end}}</td>
+      </tr>
+    {{else}}<tr><td colspan="5" class="muted">No judges yet. Invite some →</td></tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+</section>
+<aside>
+  <div class="card">
+    <h3>Invite a judge or organizer</h3>
+    {{if .InviteLink}}<div class="notice"><p class="small">Send this link (single use, 14 days). It is shown once.</p>
+      <p><input type="text" readonly id="invlink" class="copy" value="{{.InviteLink}}"></p><button type="button" class="small" data-copy="invlink">Copy</button></div>{{end}}
+    {{if .ActivationLink}}<div class="notice"><p class="small">Activation link (7 days, shown once):</p>
+      <p><input type="text" readonly id="actlink" class="copy" value="{{.ActivationLink}}"></p><button type="button" class="small" data-copy="actlink">Copy</button></div>{{end}}
+    <form method="post" action="/organize/{{.Event.Slug}}/invite" class="stack">
+      {{template "csrf" .CSRF}}
+      <label>Email <span class="hint">Optional. If set, only that account can accept.</span><input type="email" name="email"></label>
+      <label>Role<select name="role"><option value="judge">Judge</option><option value="organizer">Organizer</option></select></label>
+      <div><button class="secondary">Create invite link</button></div>
+    </form>
+  </div>
+  <div class="card">
+    <h3>Reviews per project</h3>
+    <div class="hist">{{range .Hist}}<div><span>{{.Projects}}</span><i style="height: {{percent .Projects $.P.Projects}}%"></i><span>{{.Reviews}}</span></div>{{end}}</div>
+    <p class="small muted">Completed reviews (x) by number of projects (bar).</p>
+  </div>
+  <div class="card">
+    <h3>Exports</h3>
+    <p class="small"><a href="/api/v1/events/{{.Event.ID}}/export/scores.csv">scores.csv</a> · <a href="/api/v1/events/{{.Event.ID}}/export/results.csv">results.csv</a> · <a href="/api/v1/events/{{.Event.ID}}/export.json">full event JSON</a></p>
+  </div>
+</aside>
+</div>
+{{end}}

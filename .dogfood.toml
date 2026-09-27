@@ -1,0 +1,24 @@
+# .dogfood.toml — read by the DOGFOOD acceptance checker (run.py).
+# Headers below are the demo credentials the seed installs on every fresh
+# `docker compose up` (DOGFOOD_DEMO=1). Turn demo mode off for real events.
+
+[portal]
+base_url = "http://localhost:8080"
+
+[tiers]
+claimed = ["T1", "T2", "T3", "T4"]
+pitch = "A self-hosted judging platform whose scores you can defend: backend-enforced isolation, a documented leniency-and-scale normalization with uncertainty, Bradley-Terry pairwise mode, and a tamper-evident audit trail."
+
+[auth]
+organizer   = "Authorization: Bearer demo-organizer-4f2a81"
+judge_a     = "Authorization: Bearer demo-judge-a-91bc3d"
+judge_b     = "Authorization: Bearer demo-judge-b-44de5f"
+participant = "Authorization: Bearer demo-participant-2e88a0"
+
+[routes]
+gallery      = "/projects"
+submit       = "/api/v1/events/evt_01/projects"
+judge_scores = "/api/v1/judge/scores"
+# judge_a is fixture judge jdg_26; judge_b (jdg_24) must be refused.
+peer_scores  = "/api/v1/judge/scores?judge=jdg_26"
+csv_export   = "/api/v1/events/evt_01/export/scores.csv"

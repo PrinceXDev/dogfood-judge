@@ -1,0 +1,74 @@
+{{define "content"}}
+<p class="small"><a href="/events/{{.Event.Slug}}">← {{.Event.Name}}</a></p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if not .Team}}
+  <h1>Join {{.Event.Name}}</h1>
+  {{if .Roles.judge}}<p class="warnbox">You judge this event, so you cannot join a team in it.</p>
+  {{else if .Closed}}<p class="warnbox">Submissions have closed, so teams are locked.</p>
+  {{else}}
+  <p>Create a team, then share its invite link with up to {{add .Event.MaxTeamSize -1}} teammates. Got a link from a teammate? Open it to join their team.</p>
+  <form method="post" action="/events/{{.Event.Slug}}/team" class="row">
+    {{template "csrf" .CSRF}}
+    <label>Team name<input type="text" name="name" maxlength="60" required></label>
+    <div><button>Create team</button></div>
+  </form>
+  {{end}}
+{{else}}
+  <h1>{{.Team.Name}}</h1>
+  <div class="cols">
+  <section>
+    {{$p := .Team.Project}}
+    <h2>Submission</h2>
+    <p class="muted small">Deadline {{date .Event.SubmissionsCloseAt}}.
+      {{if $p}}{{if eq $p.Status "submitted"}}<span class="tag good">submitted {{date $p.SubmittedAt}}</span>{{else}}<span class="tag warn">draft, not submitted</span>{{end}}{{end}}</p>
+    {{if .SubmissionsOpen}}
+    <form method="post" action="/events/{{.Event.Slug}}/submission" class="stack">
+      {{template "csrf" .CSRF}}
+      {{if $p}}<input type="hidden" name="project_id" value="{{$p.ID}}">{{end}}
+      {{$d := .Draft}}
+      <label>Title<input type="text" name="title" maxlength="120" required value="{{if $d}}{{$d.Title}}{{else if $p}}{{$p.Title}}{{end}}"></label>
+      <label>One-line summary<input type="text" name="summary" maxlength="280" value="{{if $d}}{{$d.Summary}}{{else if $p}}{{$p.Summary}}{{end}}"></label>
+      {{if .Event.Tracks}}
+      <label>Track<select name="track_id">
+        <option value="">Choose a track</option>
+        {{range .Event.Tracks}}<option value="{{.ID}}"{{if $d}}{{if eq .ID $d.TrackID}} selected{{end}}{{else if $p}}{{if eq .ID $p.TrackID}} selected{{end}}{{end}}>{{.Name}}</option>{{end}}
+      </select></label>
+      {{end}}
+      <label>Description<textarea name="description" maxlength="20000">{{if $d}}{{$d.Description}}{{else if $p}}{{$p.Description}}{{end}}</textarea></label>
+      <label>Repository URL<input type="url" name="repo_url" value="{{if $d}}{{$d.RepoURL}}{{else if $p}}{{$p.RepoURL}}{{end}}"></label>
+      <label>Demo URL<input type="url" name="demo_url" value="{{if $d}}{{$d.DemoURL}}{{else if $p}}{{$p.DemoURL}}{{end}}"></label>
+      <div class="row">
+        <div><button name="action" value="draft" class="secondary">Save draft</button></div>
+        {{if or (not $p) (eq $p.Status "draft")}}<div><button name="action" value="submit">Submit</button></div>
+        {{else}}<div><button name="action" value="submit">Save changes</button></div>{{end}}
+      </div>
+      <p class="small muted">You can edit until the deadline, even after submitting. After the deadline the server refuses every change.</p>
+    </form>
+    {{else if $p}}
+      <p><b>{{$p.Title}}</b> · <a href="/p/{{$p.ID}}">View</a></p>
+      <p class="muted">Submissions are closed; the project is locked.</p>
+      {{if eq $p.Status "submitted"}}<p><a href="/events/{{.Event.Slug}}/certificate">Your signed participation certificate</a></p>{{end}}
+    {{else}}
+      <p class="muted">Submissions are not open.</p>
+    {{end}}
+  </section>
+  <aside>
+    <div class="card">
+      <h3>Members ({{len .Team.Members}}/{{.Event.MaxTeamSize}})</h3>
+      {{range .Team.Members}}<p class="small">{{.Name}} <span class="muted">{{.Email}}</span></p>{{end}}
+    </div>
+    {{if .SubmissionsOpen}}
+    <div class="card">
+      <h3>Invite link</h3>
+      <p><input type="text" readonly id="invite" class="copy" value="{{.InviteURL}}"></p>
+      <p><button type="button" class="small" data-copy="invite">Copy</button></p>
+      <form method="post" action="/events/{{.Event.Slug}}/team/rotate" data-confirm="The old link will stop working. Continue?">
+        {{template "csrf" .CSRF}}<button class="link small">Replace link</button></form>
+    </div>
+    <form method="post" action="/events/{{.Event.Slug}}/team/leave" data-confirm="Leave this team?">
+      {{template "csrf" .CSRF}}<button class="danger small">Leave team</button></form>
+    {{end}}
+  </aside>
+  </div>
+{{end}}
+{{end}}

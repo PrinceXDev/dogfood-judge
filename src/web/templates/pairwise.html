@@ -1,0 +1,33 @@
+{{define "content"}}
+<p class="small"><a href="/judge">← Judging</a> · {{.Event.Name}} · {{.Offer.Done}} comparisons so far</p>
+<h1>Which is better?</h1>
+<p class="muted">No scores, just a choice. The server picks the pair whose outcome it is least sure about and fits a Bradley–Terry model to all judges' choices. Keyboard: <kbd>A</kbd>, <kbd>B</kbd>, <kbd>T</kbd> for a tie.</p>
+{{if not .Offer.A}}
+  <p class="notice">You have compared every pair available to you. Thank you.</p>
+{{else}}
+<form method="post" data-pairwise>
+  {{template "csrf" .CSRF}}
+  <input type="hidden" name="a" value="{{.Offer.A.ID}}">
+  <input type="hidden" name="b" value="{{.Offer.B.ID}}">
+  <div class="versus">
+    <div class="card">
+      <p class="small muted">A</p>
+      <h3>{{.Offer.A.Title}}</h3>
+      <p class="small muted">{{.Offer.A.TeamName}}{{if .Offer.A.TrackName}} · {{.Offer.A.TrackName}}{{end}}</p>
+      <p>{{.Offer.A.Summary}}</p>
+      {{if .Offer.A.RepoURL}}<p class="small"><a href="{{.Offer.A.RepoURL}}" target="_blank" rel="noopener nofollow">Repository</a></p>{{end}}
+      <button name="outcome" value="a">A is better</button>
+    </div>
+    <div class="vs">vs<br><button name="outcome" value="tie" class="secondary small">Tie</button></div>
+    <div class="card">
+      <p class="small muted">B</p>
+      <h3>{{.Offer.B.Title}}</h3>
+      <p class="small muted">{{.Offer.B.TeamName}}{{if .Offer.B.TrackName}} · {{.Offer.B.TrackName}}{{end}}</p>
+      <p>{{.Offer.B.Summary}}</p>
+      {{if .Offer.B.RepoURL}}<p class="small"><a href="{{.Offer.B.RepoURL}}" target="_blank" rel="noopener nofollow">Repository</a></p>{{end}}
+      <button name="outcome" value="b">B is better</button>
+    </div>
+  </div>
+</form>
+{{end}}
+{{end}}

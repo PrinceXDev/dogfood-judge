@@ -1,0 +1,751 @@
+openapi: 3.1.0
+info:
+  title: Dogfood Judge API
+  version: "1.0"
+  summary: Every action in the portal, over HTTP.
+  description: |
+    The pages and this API call the same service layer, so authorization is
+    identical in both. Authenticate with `Authorization: Bearer <token>` (from
+    `POST /auth/login` or an API token created on the account page). Cookie
+    sessions also work; state-changing cookie requests must send `X-CSRF-Token`.
+
+    `{event}` accepts an event id (`evt_01`) or slug (`sample-hack-2026`).
+    Timestamps are RFC 3339 in UTC. Errors are
+    `{"error": {"code": "...", "message": "..."}}`.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - bearer: []
+tags:
+  - name: auth
+  - name: events
+  - name: projects
+  - name: teams
+  - name: judging
+  - name: results
+  - name: voting
+  - name: portability
+  - name: webhooks
+  - name: records
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Exchange email and password for a session token (rate limited, 10/min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+      responses:
+        "200": { description: Token, content: { application/json: { schema: { $ref: "#/components/schemas/TokenResponse" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/signup:
+    post:
+      tags: [auth]
+      security: []
+      summary: Create an account (5/hour per IP). Existing and imported emails are refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Credentials"
+                - type: object
+                  required: [name]
+                  properties: { name: { type: string, maxLength: 80 } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/TokenResponse" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate the current session.
+      responses: { "204": { description: Done } }
+  /activate/{token}:
+    post:
+      tags: [auth]
+      security: []
+      summary: Set a password with a one-time activation link (imported judges and participants).
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { password: { type: string, minLength: 10 } } } } }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/TokenResponse" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /me:
+    get:
+      tags: [auth]
+      summary: The caller and their roles per event.
+      responses:
+        "200":
+          description: Me
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  roles: { type: object, additionalProperties: { type: array, items: { $ref: "#/components/schemas/Role" } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /tokens:
+    post:
+      tags: [auth]
+      summary: Create a non-expiring API token acting with the caller's roles.
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { label: { type: string } } } } }
+      responses:
+        "201": { description: Token (shown once), content: { application/json: { schema: { type: object, properties: { token: { type: string } } } } } }
+
+  /events:
+    get:
+      tags: [events]
+      security: [{}, { bearer: [] }]
+      summary: Public events plus any the caller has a role in.
+      responses:
+        "200": { description: Events, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Event" } } } } }
+    post:
+      tags: [events]
+      summary: Create an event (admins). The creator becomes its organizer.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/EventInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Event" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /events/{event}:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [events]
+      security: [{}, { bearer: [] }]
+      summary: Event with tracks, prizes and rubric.
+      responses:
+        "200": { description: Event, content: { application/json: { schema: { $ref: "#/components/schemas/Event" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [events]
+      summary: Replace the event's settings (organizers). Deadline changes are audited with old and new values.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/EventInput" } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Event" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /events/{event}/tracks:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [events]
+      summary: Add a track (organizers).
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Track" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Track" } } } } }
+  /events/{event}/prizes:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [events]
+      summary: Add a prize, optionally per track (organizers).
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Prize" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Prize" } } } } }
+  /events/{event}/criteria:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [events]
+      summary: Add a rubric criterion (organizers).
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Criterion" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Criterion" } } } } }
+  /events/{event}/criteria/weights:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    put:
+      tags: [events]
+      summary: Re-weight criteria, keyed by criterion id. Raw scores are never changed.
+      requestBody:
+        content: { application/json: { schema: { type: object, additionalProperties: { type: number, exclusiveMinimum: 0 } } } }
+      responses: { "200": { description: Event, content: { application/json: { schema: { $ref: "#/components/schemas/Event" } } } } }
+  /events/{event}/invitations:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [events]
+      summary: Create a single-use judge or organizer invitation link (organizers).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                email: { type: string, format: email, description: If set, only this account can accept. }
+                role: { type: string, enum: [judge, organizer] }
+      responses:
+        "201":
+          description: Invitation
+          content: { application/json: { schema: { type: object, properties: { url: { type: string }, invitation: { type: object } } } } }
+  /invitations/{token}/accept:
+    post:
+      tags: [events]
+      summary: Accept an invitation. Refused (409) for participants of the event (conflict of interest).
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Event joined, content: { application/json: { schema: { $ref: "#/components/schemas/Event" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /events/{event}/judges:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [judging]
+      summary: Judges with tracks and progress (organizers).
+      responses: { "200": { description: Judges } }
+  /events/{event}/judges/{user}/tracks:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: user, in: path, required: true, schema: { type: string } }]
+    put:
+      tags: [judging]
+      summary: Set a judge's track expertise, used by the assignment engine.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { tracks: { type: array, items: { type: string } } } } } } }
+      responses: { "204": { description: Saved } }
+  /events/{event}/users/{user}/activation:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: user, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [auth]
+      summary: One-time activation link for an imported judge or participant (organizers).
+      responses: { "201": { description: Link, content: { application/json: { schema: { type: object, properties: { url: { type: string } } } } } } }
+
+  /projects:
+    get:
+      tags: [projects]
+      security: [{}, { bearer: [] }]
+      summary: Public gallery across events. Submitted, non-duplicate projects only.
+      parameters:
+        - { name: event, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: Matches title, summary, team and track. }
+        - { name: track, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+      responses: { "200": { description: Page, content: { application/json: { schema: { $ref: "#/components/schemas/GalleryPage" } } } } }
+  /events/{event}/projects:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [projects]
+      security: [{}, { bearer: [] }]
+      summary: Public gallery for one event.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: track, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+      responses: { "200": { description: Page, content: { application/json: { schema: { $ref: "#/components/schemas/GalleryPage" } } } } }
+    post:
+      tags: [projects]
+      summary: Create the caller's team project (participants). Draft unless submit=true.
+      description: The deadline is checked before anything else; after it every write returns 403 `submissions_closed`, enforced again by a database trigger.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Project" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /projects/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [projects]
+      security: [{}, { bearer: [] }]
+      summary: One project. Drafts are visible only to the team and organizers.
+      responses:
+        "200": { description: Project, content: { application/json: { schema: { $ref: "#/components/schemas/Project" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [projects]
+      summary: Edit (team members, until the team's deadline). submit=true submits a draft.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectInput" } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Project" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /projects/{id}/duplicate:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [projects]
+      summary: Mark as a duplicate of another project, or clear with an empty `of` (organizers).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { of: { type: string } } } } } }
+      responses: { "204": { description: Done } }
+  /projects/{id}/disqualify:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [projects]
+      summary: Disqualify with a reason, or reinstate with an empty reason (organizers).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { "204": { description: Done } }
+  /events/{event}/duplicates:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [projects]
+      summary: Pairs sharing a normalised title or repository URL (organizers).
+      responses: { "200": { description: Pairs } }
+
+  /events/{event}/teams:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [teams]
+      summary: Create a team; the caller becomes a participant. Judges of the event are refused.
+      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses: { "201": { description: Team with invite token, content: { application/json: { schema: { $ref: "#/components/schemas/Team" } } } } }
+  /events/{event}/team:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [teams]
+      summary: The caller's team, members, invite token and project.
+      responses:
+        "200": { description: Team, content: { application/json: { schema: { $ref: "#/components/schemas/Team" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /teams/join:
+    post:
+      tags: [teams]
+      summary: Join a team by invite token (until the deadline, up to the team size limit).
+      requestBody: { content: { application/json: { schema: { type: object, required: [token], properties: { token: { type: string } } } } } }
+      responses:
+        "200": { description: Team, content: { application/json: { schema: { $ref: "#/components/schemas/Team" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /events/{event}/team/leave:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post: { tags: [teams], summary: Leave your team (before the deadline)., responses: { "204": { description: Done } } }
+  /events/{event}/team/invite/rotate:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post: { tags: [teams], summary: Replace the team invite link; the old one stops working., responses: { "200": { description: Team } } }
+  /events/{event}/teams/{team}/extension:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: team, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [teams]
+      summary: Extend one team's deadline (organizers). Honoured by the database trigger and audited.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { minutes: { type: integer }, reason: { type: string } } } } } }
+      responses: { "204": { description: Granted } }
+
+  /judge/scores:
+    get:
+      tags: [judging]
+      summary: The caller's own reviews. Asking for another judge is 403 unless the caller organizes that event.
+      parameters:
+        - { name: judge, in: query, schema: { type: string }, description: Judge user id. Omit for yourself. }
+        - { name: event, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Reviews, content: { application/json: { schema: { type: object, properties: { scores: { type: array, items: { $ref: "#/components/schemas/Review" } } } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /judge/assignments:
+    get:
+      tags: [judging]
+      summary: The caller's assignments with their own reviews.
+      parameters: [{ name: event, in: query, schema: { type: string } }]
+      responses: { "200": { description: Assignments } }
+  /events/{event}/reviews/{project}:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: project, in: path, required: true, schema: { type: string } }]
+    put:
+      tags: [judging]
+      summary: Create or update the caller's review of an assigned project while judging is open.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scores]
+              properties:
+                scores: { type: object, additionalProperties: { type: integer }, description: Criterion key to value, every criterion required. }
+                comment: { type: string, maxLength: 5000 }
+      responses:
+        "200": { description: Review, content: { application/json: { schema: { $ref: "#/components/schemas/Review" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /events/{event}/reviews:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [judging]
+      summary: Every review in the event (organizers).
+      responses: { "200": { description: Reviews, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Review" } } } } } }
+  /events/{event}/assignments/run:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [judging]
+      summary: Top every project up to reviews_per_project (organizers). Never removes work.
+      responses: { "200": { description: Assignment report, content: { application/json: { schema: { $ref: "#/components/schemas/AssignReport" } } } } }
+  /events/{event}/assignments/{project}/recuse:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: project, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [judging]
+      summary: Decline a pending assignment with a reason (judges).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { "204": { description: Done } }
+  /events/{event}/pairwise/next:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [judging]
+      summary: The judge's current pair (the most informative one the server can find).
+      responses: { "200": { description: Pair offer, content: { application/json: { schema: { $ref: "#/components/schemas/PairOffer" } } } } }
+  /events/{event}/pairwise:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [judging]
+      summary: Verdict on the offered pair only; any other pair is 409 stale_pair.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [a, b, outcome], properties: { a: { type: string }, b: { type: string }, outcome: { type: string, enum: [a, b, tie] } } }
+      responses:
+        "204": { description: Recorded }
+        "409": { $ref: "#/components/responses/Error" }
+  /events/{event}/progress:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [results]
+      summary: Live judging progress (organizers). The dashboard polls this.
+      responses: { "200": { description: Progress } }
+  /events/{event}/results:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [results]
+      security: [{}, { bearer: [] }]
+      summary: Normalized ranking with uncertainty. Organizers always; others after publication, without judge diagnostics.
+      parameters: [{ name: bootstrap, in: query, schema: { type: integer, default: 300, maximum: 2000 } }]
+      responses:
+        "200": { description: Results, content: { application/json: { schema: { $ref: "#/components/schemas/Results" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /events/{event}/publish:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [results]
+      summary: Publish (or unpublish with published=false) results. Refused while community voting is open.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { published: { type: boolean, default: true } } } } } }
+      responses:
+        "204": { description: Done }
+        "409": { $ref: "#/components/responses/Error" }
+  /events/{event}/audit:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [results]
+      summary: The event's audit trail and a verification of the instance-wide hash chain (organizers).
+      responses: { "200": { description: Audit } }
+
+  /events/{event}/export/scores.csv:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [portability]
+      summary: One row per review, one column per criterion (organizers). Formula-injection safe.
+      responses: { "200": { description: CSV, content: { text/csv: { schema: { type: string } } } } }
+  /events/{event}/export/results.csv:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [portability]
+      summary: Normalized ranking with every method side by side (organizers).
+      responses: { "200": { description: CSV, content: { text/csv: { schema: { type: string } } } } }
+  /events/{event}/export.json:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [portability]
+      summary: The whole event in the fixtures.json interchange format (organizers).
+      responses: { "200": { description: Document, content: { application/json: { schema: { $ref: "#/components/schemas/Doc" } } } } }
+  /import:
+    post:
+      tags: [portability]
+      summary: Import an event in the fixtures.json format (admins). Colliding ids are remapped and reported.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Doc" } } } }
+      responses: { "201": { description: Import report } }
+
+  /events/{event}/ballot:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [voting]
+      summary: The caller's ballot, shuffled per voter (stable across reloads).
+      responses: { "200": { description: Ballot } }
+  /projects/{id}/vote:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [voting]
+      summary: Vote (within the event budget; not for your own team). Suspicious votes are held for review.
+      responses:
+        "204": { description: Recorded }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [voting]
+      summary: Withdraw a vote while voting is open.
+      responses: { "204": { description: Withdrawn } }
+  /events/{event}/votes/flagged:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get: { tags: [voting], summary: Votes held by the anti-abuse rules (organizers)., responses: { "200": { description: Held votes } } }
+  /events/{event}/votes/review:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [voting]
+      summary: Count or discard a held vote (organizers).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { user: { type: string }, project: { type: string }, approve: { type: boolean } } } } } }
+      responses: { "204": { description: Done } }
+  /projects/{id}/comments:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get: { tags: [voting], security: [{}, { bearer: [] }], summary: Visible comments., responses: { "200": { description: Comments } } }
+    post:
+      tags: [voting]
+      summary: Comment on a submitted project (10/min; exact repeats refused).
+      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 2000 } } } } } }
+      responses: { "201": { description: Comment } }
+  /comments/{id}/hide:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [voting]
+      summary: Hide or unhide a comment (organizers).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { hidden: { type: boolean, default: true } } } } } }
+      responses: { "204": { description: Done } }
+
+  /events/{event}/webhooks:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get: { tags: [webhooks], summary: Registered webhooks (organizers)., responses: { "200": { description: Webhooks } } }
+    post:
+      tags: [webhooks]
+      summary: Register a webhook. The response carries the signing secret once.
+      description: Deliveries POST `{topic, event_id, at, data}` with `X-Dogfood-Signature: sha256=<hex HMAC-SHA256(secret, body)>`, retried with exponential backoff up to 8 attempts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                topics: { type: array, items: { type: string, enum: ["*", project.submitted, review.submitted, results.published] } }
+      responses: { "201": { description: Webhook with secret } }
+  /events/{event}/webhooks/{id}:
+    parameters: [{ $ref: "#/components/parameters/Event" }, { name: id, in: path, required: true, schema: { type: string } }]
+    delete: { tags: [webhooks], summary: Remove a webhook., responses: { "204": { description: Removed } } }
+  /events/{event}/webhooks/deliveries:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get: { tags: [webhooks], summary: Recent delivery attempts., responses: { "200": { description: Deliveries } } }
+
+  /events/{event}/records/judge:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [records]
+      summary: Signed record of the caller's judging (after publication).
+      responses: { "200": { description: Record, content: { application/json: { schema: { $ref: "#/components/schemas/RecordResponse" } } } } }
+  /events/{event}/records/participant:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [records]
+      summary: Signed participation certificate (after submissions close).
+      responses: { "200": { description: Record, content: { application/json: { schema: { $ref: "#/components/schemas/RecordResponse" } } } } }
+  /records/verify:
+    post:
+      tags: [records]
+      security: []
+      summary: Verify a record against this portal's key.
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/SignedRecord" } } } }
+      responses: { "200": { description: Verdict, content: { application/json: { schema: { type: object, properties: { valid: { type: boolean }, payload: { type: object }, reason: { type: string } } } } } } }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    Event: { name: event, in: path, required: true, schema: { type: string }, description: Event id or slug. }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string, examples: [submissions_closed, forbidden, stale_pair, vote_budget_exhausted] }
+                  message: { type: string }
+  schemas:
+    Role: { type: string, enum: [organizer, judge, participant] }
+    Credentials:
+      type: object
+      required: [email, password]
+      properties: { email: { type: string, format: email }, password: { type: string, minLength: 10 } }
+    TokenResponse:
+      type: object
+      properties: { token: { type: string }, user: { $ref: "#/components/schemas/User" }, expires_in: { type: integer } }
+    User:
+      type: object
+      properties: { id: { type: string }, email: { type: string }, name: { type: string }, is_admin: { type: boolean } }
+    Track: { type: object, properties: { id: { type: string }, name: { type: string }, description: { type: string } } }
+    Prize: { type: object, properties: { id: { type: string }, track_id: { type: string }, name: { type: string }, description: { type: string }, value: { type: string } } }
+    Criterion:
+      type: object
+      properties:
+        id: { type: string }
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        weight: { type: number }
+        scale_min: { type: integer }
+        scale_max: { type: integer }
+    Event:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        submissions_open_at: { type: string, format: date-time }
+        submissions_close_at: { type: string, format: date-time }
+        judging_close_at: { type: [string, "null"], format: date-time }
+        voting_open_at: { type: [string, "null"], format: date-time }
+        voting_close_at: { type: [string, "null"], format: date-time }
+        results_published_at: { type: [string, "null"], format: date-time }
+        reviews_per_project: { type: integer }
+        max_team_size: { type: integer }
+        votes_per_voter: { type: integer }
+        is_public: { type: boolean }
+        tracks: { type: array, items: { $ref: "#/components/schemas/Track" } }
+        prizes: { type: array, items: { $ref: "#/components/schemas/Prize" } }
+        criteria: { type: array, items: { $ref: "#/components/schemas/Criterion" } }
+    EventInput:
+      type: object
+      required: [name, submissions_open_at, submissions_close_at]
+      properties:
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        submissions_open_at: { type: string, format: date-time }
+        submissions_close_at: { type: string, format: date-time }
+        judging_close_at: { type: [string, "null"], format: date-time }
+        voting_open_at: { type: [string, "null"], format: date-time }
+        voting_close_at: { type: [string, "null"], format: date-time }
+        reviews_per_project: { type: integer, default: 3 }
+        max_team_size: { type: integer, default: 4 }
+        votes_per_voter: { type: integer, default: 3 }
+        is_public: { type: boolean, default: true }
+        tracks: { type: array, items: { type: string }, description: Create only. }
+        criteria: { type: array, items: { type: string }, description: Create only; equal weights. }
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        event_id: { type: string }
+        team_id: { type: string }
+        team_name: { type: string }
+        track_id: { type: string }
+        track_name: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        description: { type: string }
+        repo_url: { type: string }
+        demo_url: { type: string }
+        status: { type: string, enum: [draft, submitted] }
+        submitted_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: string, format: date-time }
+        duplicate_of: { type: string }
+        disqualified_reason: { type: string }
+    ProjectInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 120 }
+        summary: { type: string, maxLength: 280 }
+        description: { type: string, maxLength: 20000 }
+        repo_url: { type: string, format: uri }
+        demo_url: { type: string, format: uri }
+        track_id: { type: string }
+        submit: { type: boolean, default: false }
+    GalleryPage:
+      type: object
+      properties:
+        projects: { type: array, items: { $ref: "#/components/schemas/Project" } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    Team:
+      type: object
+      properties:
+        id: { type: string }
+        event_id: { type: string }
+        name: { type: string }
+        invite_token: { type: string }
+        members: { type: array, items: { $ref: "#/components/schemas/User" } }
+        project: { $ref: "#/components/schemas/Project" }
+    Review:
+      type: object
+      properties:
+        judge_id: { type: string }
+        judge_name: { type: string }
+        project_id: { type: string }
+        event_id: { type: string }
+        scores: { type: object, additionalProperties: { type: integer } }
+        composite: { type: number, description: "Σ weight × score / Σ weight" }
+        comment: { type: string }
+        updated_at: { type: string, format: date-time }
+    AssignReport:
+      type: object
+      properties:
+        new: { type: array, items: { type: object, properties: { judge: { type: string }, project: { type: string }, reason: { type: string } } } }
+        load_min: { type: integer }
+        load_max: { type: integer }
+        load_mean: { type: number }
+        components: { type: integer }
+        underfilled: { type: array, items: { type: string } }
+        off_track: { type: integer }
+    PairOffer:
+      type: object
+      properties:
+        event_id: { type: string }
+        a: { $ref: "#/components/schemas/Project" }
+        b: { $ref: "#/components/schemas/Project" }
+        done: { type: integer }
+    Results:
+      type: object
+      properties:
+        published: { type: boolean }
+        report:
+          type: object
+          description: Methods raw, zscore, bias, biasscale (primary), pairwise; see JUDGING.md.
+          properties:
+            primary: { type: string }
+            fit: { type: object }
+            agreement: { type: object, additionalProperties: { type: number } }
+            components: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              project: { $ref: "#/components/schemas/Project" }
+              reviews: { type: integer }
+              scores: { type: object, additionalProperties: { type: number } }
+              ranks: { type: object, additionalProperties: { type: integer } }
+              se: { type: number }
+              rank_low: { type: integer }
+              rank_high: { type: integer }
+              prob_top_k: { type: number }
+              rank_change: { type: integer }
+              provisional: { type: boolean }
+        judges: { type: array, description: Organizers only. }
+        pairwise: { type: array }
+        votes: { type: array }
+        excluded: { type: array, items: { $ref: "#/components/schemas/Project" } }
+    SignedRecord:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload: { type: string, description: Base64 of the exact signed JSON bytes. }
+        signature: { type: string, description: Base64 Ed25519 signature. }
+        key_id: { type: string }
+    RecordResponse:
+      type: object
+      properties:
+        record: { $ref: "#/components/schemas/SignedRecord" }
+        payload: { type: object }
+    Doc:
+      type: object
+      description: Superset of the DOGFOOD fixtures.json format.
+      required: [event]
+      properties:
+        event: { type: object, required: [id, name, submissions_close] }
+        tracks: { type: array }
+        criteria: { type: array }
+        judges: { type: array }
+        teams: { type: array }
+        projects: { type: array }
+        scores: { type: array }

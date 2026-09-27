@@ -1,0 +1,103 @@
+{{define "content"}}
+<h1>{{.Event.Name}}</h1>
+{{template "eventnav" .Event}}
+{{$r := .Res.Report}}
+<div class="row">
+  <div>
+    {{if .Res.Published}}<p><span class="tag good">published</span> Visible to everyone at <a href="/events/{{.Event.Slug}}/results">/events/{{.Event.Slug}}/results</a>.</p>
+    {{else}}<p><span class="tag warn">not published</span> Only organizers can see this page. Judges cannot see any scores but their own.</p>{{end}}
+  </div>
+  <form method="post" action="/organize/{{.Event.Slug}}/publish" class="inline" {{if not .Res.Published}}data-confirm="Publish results? Judging closes and the ranking becomes public."{{end}}>
+    {{template "csrf" .CSRF}}
+    {{if .Res.Published}}<input type="hidden" name="publish" value="0"><button class="secondary">Unpublish</button>
+    {{else}}<input type="hidden" name="publish" value="1"><button{{if .VotingOpen}} disabled title="Community voting is still open"{{end}}>Publish results</button>{{end}}
+  </form>
+</div>
+
+<div class="stats">
+  <div class="stat"><b>{{$r.Reviews}}</b><span>reviews analysed</span></div>
+  <div class="stat"><b>{{len .Res.Rows}}</b><span>ranked projects</span></div>
+  <div class="stat"><b>{{f2 $r.Fit.Sigma}}</b><span>review noise σ (scale points)</span></div>
+  <div class="stat"><b>{{f2 $r.Fit.TauBias}}</b><span>spread of judge leniency τ</span></div>
+  <div class="stat"><b>{{.Moved}}</b><span>projects whose rank changed vs raw mean</span></div>
+  <div class="stat"><b>{{$r.Components}}</b><span>connected judge group{{if ne $r.Components 1}}s{{end}}</span></div>
+</div>
+{{if gt $r.Components 1}}<p class="warnbox">The judges split into {{$r.Components}} groups that share no projects. Scores in different groups cannot be put on one scale by any method; run the assignment engine to add bridging reviews.</p>{{end}}
+{{if not $r.Fit.Converged}}<p class="warnbox">The model did not fully converge; treat small differences with care.</p>{{end}}
+
+<details>
+<summary>How to read this</summary>
+<p class="small">Each review's weighted score is modelled as <i>score = overall mean + judge leniency + judge scale × project quality + noise</i>. Leniency and scale are estimated jointly with project quality from every overlapping review, and shrunk toward "average judge" in proportion to how little evidence there is, so a judge with one review is barely adjusted and a judge with ten is adjusted as far as their data supports. The <b>adjusted score</b> is what an average judge would be expected to give. The <b>90% rank range</b> and <b>P(top {{$r.TopK}})</b> come from {{$r.Bootstrap}} bootstrap resamples of each project's reviews: if two projects' ranges overlap, the data does not separate them. Full derivation in JUDGING.md.</p>
+</details>
+
+<h2>Ranking</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th class="num">#</th><th>Project</th><th class="num">Reviews</th><th class="num">Raw mean</th><th class="num">Adjusted</th><th class="num">± SE</th>
+    <th>90% rank range</th><th class="num">P(top {{$r.TopK}})</th><th class="num">Raw rank</th><th class="num">Change</th><th class="num">Z-score rank</th><th class="num">Pairwise-induced rank</th></tr></thead>
+  <tbody>
+  {{$n := len .Res.Rows}}
+  {{range .Res.Rows}}
+    <tr>
+      <td class="num">{{index .Ranks "biasscale"}}</td>
+      <td><a href="/p/{{.Project.ID}}">{{.Project.Title}}</a> <span class="small muted mono">{{.Project.ID}}</span><br><span class="small muted">{{.Project.TrackName}}</span></td>
+      <td class="num">{{.Reviews}}{{if .Provisional}} <span class="tag warn">few</span>{{end}}</td>
+      <td class="num">{{f2 (index .Scores "raw")}}</td>
+      <td class="num"><b>{{f2 (index .Scores "biasscale")}}</b></td>
+      <td class="num">{{f2 .SE}}</td>
+      <td><div class="ci" title="ranks {{.RankLow}}–{{.RankHigh}}"><i style="left: {{ciLeft .RankLow $n}}%; width: {{ciWidth .RankLow .RankHigh $n}}%"></i><b style="left: {{ciLeft (index .Ranks "biasscale") $n}}%"></b></div><span class="small muted">{{.RankLow}}–{{.RankHigh}}</span></td>
+      <td class="num">{{pct .ProbTopK}}</td>
+      <td class="num">{{index .Ranks "raw"}}</td>
+      <td class="num {{if gt .RankChange 0}}up{{else if lt .RankChange 0}}down{{end}}">{{if ne .RankChange 0}}{{signed .RankChange}}{{else}}·{{end}}</td>
+      <td class="num">{{index .Ranks "zscore"}}</td>
+      <td class="num">{{index .Ranks "pairwise"}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+
+<h2>Do the methods agree?</h2>
+<p class="small muted">Kendall's τ between each method's ranking and the primary (bias + scale) ranking. 1 means identical order.</p>
+<table><thead><tr><th>Method</th><th class="num">τ vs primary</th></tr></thead><tbody>
+{{range .Agreement}}<tr><td>{{.Name}}</td><td class="num">{{f2 .Tau}}</td></tr>{{end}}
+</tbody></table>
+
+<h2>Judges</h2>
+<p class="small muted">Leniency is in scale points (+ = gives higher scores than an average judge would). Scale below 1 means the judge compresses differences between projects. Flags are prompts to look, not verdicts.</p>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Judge</th><th class="num">Reviews</th><th class="num">Mean given</th><th class="num">SD given</th><th class="num">Leniency</th><th class="num">± SE</th><th class="num">Scale</th><th>Flags</th></tr></thead>
+  <tbody>
+  {{range .Res.Judges}}
+    <tr><td>{{.Name}} <span class="small muted mono">{{.Judge}}</span></td><td class="num">{{.Reviews}}</td><td class="num">{{f2 .MeanGiven}}</td><td class="num">{{f2 .SDGiven}}</td>
+      <td class="num">{{signedf .Bias}}</td><td class="num">{{f2 .BiasSE}}</td><td class="num">{{f2 .Scale}}</td>
+      <td class="small">{{range .Flags}}<span class="tag warn">{{.}}</span> {{end}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+
+{{if .Res.Pairwise}}
+<h2>Pairwise mode (Bradley–Terry)</h2>
+<p class="small muted">Strength is on the log-odds scale: a gap of 1.0 means the stronger project wins about 73% of comparisons. Fitted by MM with a weak prior (one virtual win and loss per project), so undefeated projects stay finite.</p>
+<table><thead><tr><th class="num">#</th><th>Project</th><th class="num">Strength</th><th class="num">± SE</th><th class="num">Comparisons</th></tr></thead><tbody>
+{{range .Res.Pairwise}}<tr><td class="num">{{.Rank}}</td><td>{{.Project.Title}}</td><td class="num">{{signedf .Strength}}</td><td class="num">{{f2 .SE}}</td><td class="num">{{.Comparisons}}</td></tr>{{end}}
+</tbody></table>
+{{end}}
+
+{{if .Res.Votes}}
+<h2>Community vote</h2>
+<table><thead><tr><th>Project</th><th class="num">Counted</th><th class="num">Held for review</th></tr></thead><tbody>
+{{range .Res.Votes}}<tr><td>{{.Project.Title}}</td><td class="num">{{.Counted}}</td><td class="num">{{.Held}}</td></tr>{{end}}
+</tbody></table>
+{{end}}
+
+{{if .Res.Excluded}}
+<h2>Excluded from ranking</h2>
+<ul>{{range .Res.Excluded}}<li><a href="/p/{{.ID}}">{{.Title}}</a> <span class="mono small">{{.ID}}</span> ·
+  {{if .DuplicateOf}}duplicate of <span class="mono">{{.DuplicateOf}}</span>{{end}}{{if .DisqualifiedReason}}disqualified: {{.DisqualifiedReason}}{{end}}</li>{{end}}</ul>
+<p class="small muted">Their reviews are kept and exported, but they do not enter the model. Reinstate them from Moderation.</p>
+{{end}}
+<p class="small"><a href="/api/v1/events/{{.Event.ID}}/export/results.csv">Download results.csv</a> · <a href="/api/v1/events/{{.Event.ID}}/results">JSON</a></p>
+{{end}}

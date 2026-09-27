@@ -1,0 +1,61 @@
+{{define "content"}}
+<h1>{{.Event.Name}}</h1>
+<p><span class="tag">{{.Phase}}</span>
+  {{if .Roles.organizer}}<span class="tag good">you organize this</span>{{end}}
+  {{if .Roles.judge}}<span class="tag good">you judge this</span>{{end}}
+  {{if .Roles.participant}}<span class="tag good">you are participating</span>{{end}}</p>
+{{if .Event.Description}}<p>{{.Event.Description}}</p>{{end}}
+
+<div class="cols">
+<section>
+  <div class="stats">
+    <div class="stat"><b>{{.ProjectCount}}</b><span>submitted projects</span></div>
+    <div class="stat"><b>{{len .Event.Tracks}}</b><span>tracks</span></div>
+    <div class="stat"><b>{{len .Event.Criteria}}</b><span>judging criteria</span></div>
+  </div>
+  <p>
+    <a class="btn" href="/events/{{.Event.Slug}}/projects">Browse projects</a>
+    {{if .Event.Published}}<a class="btn secondary" href="/events/{{.Event.Slug}}/results">Results</a>{{end}}
+    {{if .VotingOpen}}<a class="btn secondary" href="/events/{{.Event.Slug}}/ballot">Vote</a>{{end}}
+  </p>
+
+  {{if .Roles.organizer}}
+    <h2>Organizer</h2>
+    <p><a href="/organize/{{.Event.Slug}}">Dashboard</a> · <a href="/organize/{{.Event.Slug}}/results">Results</a> · <a href="/organize/{{.Event.Slug}}/settings">Settings</a></p>
+  {{end}}
+  {{if .Roles.judge}}
+    <h2>Judge</h2>
+    <p>{{if .JudgingOpen}}Judging is open. <a href="/judge">Your assignments</a> · <a href="/judge/{{.Event.Slug}}/pairwise">Pairwise mode</a>{{else}}Judging is not open right now.{{end}}
+    {{if .Event.Published}} · <a href="/judge/{{.Event.Slug}}/record">Your signed judging record</a>{{end}}</p>
+  {{end}}
+
+  {{if not .Roles.judge}}{{if not .Roles.organizer}}
+    <h2>Participate</h2>
+    {{if .Team}}
+      <p>You are on <b>{{.Team.Name}}</b>. <a href="/events/{{.Event.Slug}}/team">Team and submission →</a></p>
+    {{else if .SubmissionsOpen}}
+      {{if .Me}}<p><a class="btn" href="/events/{{.Event.Slug}}/team">Create or join a team</a></p>
+      {{else}}<p><a href="/login?next=/events/{{.Event.Slug}}/team">Sign in</a> to form a team and submit.</p>{{end}}
+    {{else}}
+      <p class="muted">Submissions are not open.</p>
+    {{end}}
+  {{end}}{{end}}
+</section>
+
+<aside>
+  <div class="card">
+    <h3>Dates (UTC)</h3>
+    <p class="small"><b>Submissions open</b><br>{{date .Event.SubmissionsOpenAt}}</p>
+    <p class="small"><b>Submissions close</b><br>{{date .Event.SubmissionsCloseAt}}</p>
+    {{if .Event.JudgingCloseAt}}<p class="small"><b>Judging closes</b><br>{{date .Event.JudgingCloseAt}}</p>{{end}}
+    {{if .Event.VotingOpenAt}}<p class="small"><b>Community voting</b><br>{{date .Event.VotingOpenAt}} to {{date .Event.VotingCloseAt}}</p>{{end}}
+    {{if .Event.ResultsPublishedAt}}<p class="small"><b>Results published</b><br>{{date .Event.ResultsPublishedAt}}</p>{{end}}
+  </div>
+  {{if .Event.Tracks}}<div class="card"><h3>Tracks</h3><p>{{range .Event.Tracks}}<span class="tag">{{.Name}}</span> {{end}}</p></div>{{end}}
+  {{if .Event.Prizes}}<div class="card"><h3>Prizes</h3>{{range .Event.Prizes}}<p class="small"><b>{{.Name}}</b>{{if .Value}} · {{.Value}}{{end}}{{if .Description}}<br>{{.Description}}{{end}}</p>{{end}}</div>{{end}}
+  {{if .Event.Criteria}}<div class="card"><h3>How projects are judged</h3>
+    {{range .Event.Criteria}}<p class="small"><b>{{.Name}}</b> · weight {{f1 .Weight}} · {{.ScaleMin}}–{{.ScaleMax}}</p>{{end}}
+    <p class="small muted">Scores are normalized across judges to remove leniency differences; the method is documented in JUDGING.md.</p></div>{{end}}
+</aside>
+</div>
+{{end}}
