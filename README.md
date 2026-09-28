@@ -7,22 +7,46 @@ each rank is. There is a Bradley–Terry pairwise mode, a tamper-evident audit
 trail, and one command to run it all offline.
 
 Built for [DOGFOOD 2026](https://dogfoodhack.com/spec) ("build the platform
-that will judge you"). MIT licensed. Go + SQLite, one binary, no cloud.
+that will judge you"). MIT licensed. **Go + SQLite** API and judging engine,
+**Next.js 16 + Tailwind CSS 4** interface (linted with **Biome**), no cloud.
 
 ```bash
 docker compose up
 # → http://localhost:8080, seeded with the DOGFOOD fixtures (41 projects, 30 judges, 126 reviews)
 ```
 
-The first build downloads the Go and Alpine base images and Go modules. After
+The first build downloads base images, Go modules and npm packages. After
 that, the portal runs with the network off and never makes an outbound
 request (webhooks go only to URLs an organizer configures).
 
-Without Docker (Go 1.26+):
+Without Docker (Go 1.26+, Node 22+), two terminals:
 
 ```bash
-go run ./src/cmd/dogfood          # uses ./fixtures.json and ./data/dogfood.db
+DOGFOOD_FRONTEND_URL=http://127.0.0.1:3000 go run ./src/cmd/dogfood   # API + edge on :8080
+cd src/frontend && npm install && API_URL=http://127.0.0.1:8080 npm run dev -- -p 3000
+# open http://localhost:8080
 ```
+
+## What it does that other judging platforms don't
+
+- **Tells you whether the winner is defensible.** Every judge is removed in
+  turn and the ranking refitted. "First place holds in 24 of 30 refits;
+  removing any of these six judges changes it; the lead is 0.05 standard
+  errors" is a sentence no other platform prints (JUDGING.md §3.9).
+- **Finds the one review that decided a project's fate.** Reviews the model
+  cannot explain are flagged with what they are worth: "rank 19 → 29 without
+  this review". Each judge's agreement with everyone else is shown too
+  (§3.10).
+- **Spends extra judge time only where it can change a prize.** The
+  tie-breaker round assigns reviews to projects whose P(top 3) is a coin flip,
+  not to projects that are already settled (§1.1).
+- **Makes results reproducible by anyone.** Publication yields a signed bundle
+  (pseudonymized inputs, input fingerprint, audit anchor, ranking).
+  `dogfood verify-results` re-runs the engine offline and must get the same
+  answer (§7).
+- **Normalizes honestly.** A leniency-and-scale model with empirical-Bayes
+  shrinkage and bootstrap rank intervals, validated by 5,000 simulated events
+  on the fixture's own review graph, including the scenario where it loses.
 
 ---
 
@@ -68,12 +92,17 @@ Two events are seeded:
    returns **403**.
 4. **Watch.** As organizer, the dashboard updates live as reviews arrive; the
    assignment engine tops up the unfinished batches.
-5. **Decide.** _Results_ shows raw vs normalized scores, the rank change, 90%
-   rank intervals and P(top 3). Judge diagnostics flag **jdg_07** (flat scorer)
-   and the one-review judges; prj_41 is excluded as a duplicate of prj_07.
-6. **Publish.** Publish, then open the public results page, a judge's signed
-   participation record, and verify it at `/verify` (a one-character edit fails).
-   The audit log shows every step, hash-chained.
+5. **Decide.** _Results_ opens with **"Is the winner defensible?"** (the
+   fixture's winner is a statistical tie, and the page says so). Below it:
+   raw vs normalized scores, rank change, 90% rank intervals, P(top 3),
+   "ahead of next", and outlier reviews. Judge diagnostics flag **jdg_07**
+   (flat scorer) and show each judge's agreement and influence. prj_41 is
+   excluded as a duplicate of prj_07. Click **Add tie-breaker reviews** and
+   watch the dashboard gain reviews exactly on the prize boundary.
+6. **Publish.** Publish, then open the public results page. Download the
+   results bundle and run `dogfood verify-results`: VERIFIED. Edit one score in
+   the file and it fails. Check a judge's signed record at `/verify`. The
+   audit log shows every step, hash-chained.
 
 ## What is built: tiers claimed and evidence
 
@@ -118,15 +147,16 @@ tests in `tests/` cover the same ground.
 | **Normalization Proof** (Hard) | Done. Leniency + scale model with empirical-Bayes shrinkage, uncertainty by bootstrap, a connectivity check, proof on the fixture ([docs/normalization-proof.md](docs/normalization-proof.md)), and a Monte Carlo comparison against raw means and z-scores on the fixture's own review graph ([docs/simulation.md](docs/simulation.md)), including the case where it _loses_. [JUDGING.md](JUDGING.md) |
 | **Pairwise Mode** (Hard)       | Done. Bradley–Terry by MM with a regularising prior, standard errors from the information matrix, adaptive pair selection (validated against random), server-chosen pairs so judges cannot steer. JUDGING.md §5                                                                                                                                                                                         |
 | **Threat Model** (Medium)      | Done. [THREAT-MODEL.md](THREAT-MODEL.md), with what we stop and what we do not.                                                                                                                                                                                                                                                                                                                         |
-| **API First** (Medium)         | Done. Every UI action is in the API; [`openapi.yaml`](src/web/static/openapi.yaml), served at `/api/v1/openapi.yaml`.                                                                                                                                                                                                                                                                                   |
+| **API First** (Medium)         | Done, literally: the Next.js interface is itself a client of the public API, so anything the UI does a script can do. [`openapi.yaml`](src/web/static/openapi.yaml), served at `/api/v1/openapi.yaml`.                                                                                                                                                                                                 |
 
 ## Checks and tests
 
 ```bash
 docker compose up -d
 python3 run.py .dogfood.toml > acceptance-report.txt           # T1, T2 (organisers' checker)
-python3 tools/extended_check.py .dogfood.toml > extended-report.txt   # T3, T4
-go test ./...                                                   # unit + integration (~1 min)
+python3 tools/extended_check.py .dogfood.toml > extended-report.txt   # T3, T4, judging engine
+go test ./...                                                   # unit + integration (~30 s)
+(cd src/frontend && npm run check && npm run build)             # route types, TypeScript, Biome, build
 go run ./src/cmd/dogfood normalize fixtures.json                # the normalization proof
 go run ./src/cmd/dogfood simulate fixtures.json                 # the Monte Carlo validation (~4 min)
 ```
@@ -137,16 +167,17 @@ deadline and conflict-of-interest enforcement, the full lifecycle (teams,
 invites, drafts, deadline, reviews, pairwise, publish, signed records), voting
 rules and hidden results, audit-chain tamper detection, CSRF, CSV injection,
 login rate limiting, webhook delivery and signatures, import/export round trip,
-and every HTML page for every role. The maths has its own unit tests in
-`src/judging/`.
+the verifiable results bundle (genuine, tampered inputs, forged manifest) and
+tie-breaker targeting. The maths has its own unit tests in `src/judging/`,
+including a planted rogue review that outlier detection must find.
 
 ## Operating it
 
 - **Data**: one SQLite file in the `dogfood-data` volume. Back it up with
-  `docker compose cp dogfood:/data/dogfood.db ./backup.db` (stop first, or
+  `docker compose cp api:/data/dogfood.db ./backup.db` (stop first, or
   use `sqlite3 .backup`). `docker compose down -v` resets to a fresh seed.
 - **Real event**: set `DOGFOOD_DEMO=0`, set the admin password
-  (`docker compose exec dogfood dogfood set-password admin@dogfood.local`),
+  (`docker compose exec api dogfood set-password admin@dogfood.local`),
   and put it behind HTTPS with `DOGFOOD_SECURE_COOKIES=1` and
   `DOGFOOD_PUBLIC_URL`.
 - **Imported judges and participants** have no password until an organizer
@@ -171,8 +202,15 @@ and every HTML page for every role. The maths has its own unit tests in
 - **No manual unassign.** The engine only adds assignments; judges can recuse.
 - **UI times are UTC.** Accessibility is semantic HTML and keyboard-operable
   forms, not audited.
-- **Docker needs network for the first build** (base images and Go modules);
-  running needs none.
+- **Docker needs network for the first build** (base images, Go modules, npm
+  packages); running needs none.
+- **Forbidden pages return HTTP 200 with an explanation.** The API has already
+  refused the data (403), but Next.js 16's `forbidden()` is still experimental,
+  so the page renders the refusal rather than setting the status. Missing
+  resources do return 404.
+- **No browser end-to-end suite.** The Go suite drives every API flow; the
+  interface is covered by a type-checked build, Biome, and a scripted smoke
+  run of every page as every role.
 - On the fixture data the leniency correction is small. The data shows no
   judge leniency beyond noise, and the report says so rather than inventing
   corrections. The simulation shows what happens when leniency is real.

@@ -1,9 +1,0 @@
-{{define "content"}}
-<h1>Activate your account</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<p>You were added as <b>{{.User.Email}}</b>. Choose a password to sign in.</p>
-<form method="post" action="/activate/{{.Token}}" class="stack">
-  <label>Password <span class="hint">At least 10 characters.</span><input type="password" name="password" minlength="10" autocomplete="new-password" required autofocus></label>
-  <div><button>Activate</button></div>
-</form>
-{{end}}

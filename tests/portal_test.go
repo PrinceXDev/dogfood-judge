@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +23,8 @@ import (
 // acceptance report would.
 func TestAcceptanceChecks(t *testing.T) {
 	p := newPortal(t)
-	r := p.api("GET", "/projects", "", nil)
+	// The HTML gallery is served by the Next.js frontend; this checks the API it renders from.
+	r := p.api("GET", "/api/v1/projects", "", nil)
 	if r.Status != 200 || !contains(r.Body, "Glass Signal") {
 		t.Fatalf("gallery: %d, has fixture title: %v", r.Status, contains(r.Body, "Glass Signal"))
 	}
@@ -160,17 +160,40 @@ func TestSignupCannotClaimImportedAccount(t *testing.T) {
 	}
 }
 
-func TestCSRFRequiredForCookieForms(t *testing.T) {
+func TestCSRFRequiredForCookieAuthenticatedWrites(t *testing.T) {
 	p := newPortal(t)
-	b := p.browser()
-	b.login("sana7@example.org", "dogfood-demo")
-	r := b.post("", "/events/playground/team", url.Values{"name": {"No Token"}})
-	if r.Status != 403 {
-		t.Fatalf("form without CSRF token should be refused, got %d", r.Status)
+	tok := p.login("sana7@example.org", "dogfood-demo")
+	send := func(csrf string) int {
+		req, _ := http.NewRequest("POST", p.srv.URL+"/api/v1/events/playground/teams", strings.NewReader(`{"name":"Cookie Team"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "dogfood_session", Value: tok})
+		if csrf != "" {
+			req.Header.Set("X-CSRF-Token", csrf)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
 	}
-	r = b.post("/events/playground/team", "/events/playground/team", url.Values{"name": {"With Token"}})
-	if r.Status != http.StatusSeeOther {
-		t.Fatalf("form with token should succeed, got %d %s", r.Status, r.Body)
+	if got := send(""); got != 403 {
+		t.Fatalf("cookie write without CSRF token: %d, want 403", got)
+	}
+	// Bearer requests are CSRF-immune; /me hands a cookie session its token.
+	req, _ := http.NewRequest("GET", p.srv.URL+"/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "dogfood_session", Value: tok})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me struct {
+		CSRF string `json:"csrf_token"`
+	}
+	json.NewDecoder(res.Body).Decode(&me)
+	res.Body.Close()
+	if got := send(me.CSRF); got != 201 {
+		t.Fatalf("cookie write with CSRF token: %d, want 201", got)
 	}
 }
 
@@ -539,42 +562,128 @@ func TestWebhookDeliveredAndSigned(t *testing.T) {
 	}
 }
 
-func TestHTMLPagesRenderForEveryRole(t *testing.T) {
+// Publishing produces a bundle anyone can re-run offline; any edit to the
+// inputs, the manifest or the signature is caught.
+func TestVerifiableResultsBundle(t *testing.T) {
 	p := newPortal(t)
-	visitor := p.browser()
-	for _, path := range []string{"/", "/projects", "/projects?q=signal", "/events/sample-hack-2026", "/p/prj_01", "/login", "/signup", "/verify", "/api", "/embed/evt_01"} {
-		if r := visitor.get(path); r.Status != 200 {
-			t.Errorf("visitor %s: %d", path, r.Status)
+	e := p.openEvent("verify", nil)
+	slug := "verify"
+	// Two teams, two judges, a few reviews.
+	for i, name := range []string{"Alpha", "Beta", "Gamma"} {
+		u := p.signup(name+"@test.local", name)
+		p.must(p.api("POST", "/api/v1/events/"+slug+"/teams", u, map[string]string{"name": name}), 201)
+		p.must(p.api("POST", "/api/v1/events/"+slug+"/projects", u, map[string]any{"title": name + " app", "track_id": trackID(e, i%2), "submit": true}), 201)
+	}
+	var judges []string
+	for _, n := range []string{"j1", "j2"} {
+		tok := p.signup(n+"@test.local", n)
+		var inv struct{ Invitation core.Invitation }
+		p.must(p.api("POST", "/api/v1/events/"+slug+"/invitations", adminTok, map[string]string{"role": "judge"}), 201).JSON(t, &inv)
+		p.must(p.api("POST", "/api/v1/invitations/"+inv.Invitation.Token+"/accept", tok, nil), 200)
+		judges = append(judges, tok)
+	}
+	p.must(p.api("POST", "/api/v1/events/"+slug+"/assignments/run", adminTok, nil), 200)
+	now := time.Now().UTC()
+	p.must(p.api("PATCH", "/api/v1/events/"+slug, adminTok, map[string]any{"name": "Test verify", "slug": slug,
+		"submissions_open_at": now.Add(-3 * time.Hour).Format(time.RFC3339), "submissions_close_at": now.Add(-time.Minute).Format(time.RFC3339),
+		"reviews_per_project": 2}), 200)
+	for ji, j := range judges {
+		var as []core.Assignment
+		p.must(p.api("GET", "/api/v1/judge/assignments?event="+slug, j, nil), 200).JSON(t, &as)
+		for k, a := range as {
+			v := 2 + (ji+k)%4
+			p.must(p.api("PUT", "/api/v1/events/"+slug+"/reviews/"+a.Project.ID, j, map[string]any{
+				"scores": map[string]int{"functionality": v, "quality": 5 - v%3, "innovation": 3}}), 200)
 		}
 	}
-	if r := visitor.get("/organize/sample-hack-2026"); r.Status != http.StatusSeeOther {
-		t.Errorf("visitor should be sent to login from the dashboard, got %d", r.Status)
+	// Not public before publication; organizers may preview.
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/results/bundle", "", nil), 403)
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/results/bundle", adminTok, nil), 200)
+	p.must(p.api("POST", "/api/v1/events/"+slug+"/publish", adminTok, map[string]bool{"published": true}), 204)
+
+	var b core.ResultsBundle
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/results/bundle", "", nil), 200).JSON(t, &b)
+	var key struct {
+		PublicKey string `json:"public_key"`
 	}
-	org := p.browser()
-	org.login("organizer@dogfood.local", "dogfood-demo")
-	for _, path := range []string{"/organize/sample-hack-2026", "/organize/sample-hack-2026/results", "/organize/sample-hack-2026/settings",
-		"/organize/sample-hack-2026/moderation", "/organize/sample-hack-2026/audit", "/account"} {
-		if r := org.get(path); r.Status != 200 {
-			t.Errorf("organizer %s: %d", path, r.Status)
+	p.must(p.api("GET", "/.well-known/dogfood-signing-key", "", nil), 200).JSON(t, &key)
+	pub, _ := base64.StdEncoding.DecodeString(key.PublicKey)
+
+	v := core.VerifyBundle(ed25519.PublicKey(pub), b)
+	if !v.Signature || !v.Digest || !v.Reproduced {
+		t.Fatalf("genuine bundle failed: %+v", v)
+	}
+	if v.Manifest.AuditAnchor == "" || len(v.Manifest.Ranking) != 3 {
+		t.Fatalf("manifest incomplete: %+v", v.Manifest)
+	}
+	for _, r := range b.Inputs.Reviews {
+		if !strings.HasPrefix(r.Judge, "J-") {
+			t.Fatalf("judge identity leaked in bundle: %q", r.Judge)
 		}
 	}
-	judge := p.browser()
-	judge.login("rafa.okonkwo@example.org", "dogfood-demo")
-	for _, path := range []string{"/judge", "/judge/sample-hack-2026/pairwise", "/judge/sample-hack-2026/p/prj_11"} {
-		if r := judge.get(path); r.Status != 200 {
-			t.Errorf("judge %s: %d", path, r.Status)
+
+	// Change one score: the digest no longer matches the signed manifest.
+	tampered := b
+	tampered.Inputs.Reviews = append([]core.BundleReview(nil), b.Inputs.Reviews...)
+	vals := map[string]int{}
+	for k, x := range tampered.Inputs.Reviews[0].Values {
+		vals[k] = x
+	}
+	vals["functionality"] = 1
+	tampered.Inputs.Reviews[0].Values = vals
+	if v := core.VerifyBundle(ed25519.PublicKey(pub), tampered); v.Digest {
+		t.Fatal("tampered inputs passed the digest check")
+	}
+	// Rewrite the manifest's ranking: the signature breaks.
+	body, _ := base64.StdEncoding.DecodeString(b.Manifest.Payload)
+	forged := b
+	forged.Manifest.Payload = base64.StdEncoding.EncodeToString([]byte(strings.Replace(string(body), `"rank":1`, `"rank":9`, 1)))
+	if v := core.VerifyBundle(ed25519.PublicKey(pub), forged); v.Signature {
+		t.Fatal("forged manifest passed the signature check")
+	}
+}
+
+func TestTiebreakTargetsPrizeBoundary(t *testing.T) {
+	p := newPortal(t)
+	var before, after core.Progress
+	p.must(p.api("GET", "/api/v1/events/evt_01/progress", orgToken, nil), 200).JSON(t, &before)
+	var rep core.TiebreakReport
+	p.must(p.api("POST", "/api/v1/events/evt_01/assignments/tiebreak", orgToken, map[string]int{"max": 3}), 200).JSON(t, &rep)
+	if len(rep.Candidates) == 0 || len(rep.Candidates) > 3 {
+		t.Fatalf("expected 1-3 boundary projects on the fixture, got %d", len(rep.Candidates))
+	}
+	for _, c := range rep.Candidates {
+		if c.ProbTopK <= 0.05 || c.ProbTopK >= 0.95 {
+			t.Fatalf("%s is not on the boundary (P = %.2f)", c.ProjectID, c.ProbTopK)
 		}
 	}
-	if r := judge.get("/organize/sample-hack-2026"); r.Status != 403 {
-		t.Errorf("judge on dashboard: %d, want 403", r.Status)
+	for _, n := range rep.Assign.New {
+		if !strings.HasPrefix(n.Reason, "tie-breaker") {
+			t.Fatalf("assignment reason %q", n.Reason)
+		}
 	}
-	if r := judge.get("/judge/sample-hack-2026/p/prj_01"); r.Status != 403 {
-		t.Errorf("judge on unassigned project: %d, want 403", r.Status)
+	p.must(p.api("GET", "/api/v1/events/evt_01/progress", orgToken, nil), 200).JSON(t, &after)
+	if after.Assignments != before.Assignments+len(rep.Assign.New) {
+		t.Fatalf("assignments %d -> %d, new %d", before.Assignments, after.Assignments, len(rep.Assign.New))
 	}
-	// Judges submit reviews through the form.
-	r := judge.post("/judge/sample-hack-2026/p/prj_11", "/judge/sample-hack-2026/p/prj_11",
-		url.Values{"c_functionality": {"3"}, "c_quality": {"4"}, "c_innovation": {"5"}, "comment": {"updated"}})
-	if r.Status != http.StatusSeeOther {
-		t.Fatalf("review form: %d %s", r.Status, r.Body)
+	p.must(p.api("POST", "/api/v1/events/evt_01/assignments/tiebreak", judgeA, nil), 403)
+}
+
+// The landing page's public endpoints: aggregate counts and the engine demo.
+func TestPublicDemoEndpoints(t *testing.T) {
+	p := newPortal(t)
+	var st core.Stats
+	p.must(p.api("GET", "/api/v1/stats", "", nil), 200).JSON(t, &st)
+	if st.Events < 1 || st.Projects < 40 || st.Judges != 30 || st.Reviews < 100 {
+		t.Fatalf("stats %+v", st)
+	}
+	var d struct {
+		Config  map[string]any   `json:"config"`
+		Reviews []map[string]any `json:"reviews"`
+		Report  map[string]any   `json:"report"`
+	}
+	p.must(p.api("GET", "/api/v1/demo/simulate?projects=500&judges=4&coverage=3&seed=9", "", nil), 200).JSON(t, &d)
+	if d.Config["projects"].(float64) != 40 || len(d.Reviews) != 120 || d.Report["robustness"] == nil {
+		t.Fatalf("simulate: config %v, %d reviews", d.Config, len(d.Reviews))
 	}
 }

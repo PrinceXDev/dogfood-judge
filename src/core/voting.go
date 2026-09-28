@@ -394,3 +394,25 @@ func (r *RateLimiter) Allow(key string, capacity int, period time.Duration) bool
 	b.tokens--
 	return true
 }
+
+// EventComments lists every comment in an event, hidden ones included, for moderation.
+func (s *Service) EventComments(ctx context.Context, a Actor, eventID string) ([]Comment, error) {
+	if err := s.require(ctx, s.DB, a, eventID, RoleOrganizer); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.id, c.project_id, c.user_id, u.name, c.body, c.created_at, c.hidden_at IS NOT NULL
+		FROM comments c JOIN users u ON u.id = c.user_id WHERE c.event_id = ? ORDER BY c.created_at DESC, c.id LIMIT 200`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Comment{}
+	for rows.Next() {
+		var c Comment
+		var created string
+		rows.Scan(&c.ID, &c.ProjectID, &c.UserID, &c.UserName, &c.Body, &created, &c.Hidden)
+		c.CreatedAt = mustTime(created)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

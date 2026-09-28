@@ -1,6 +1,7 @@
-// Package web is the HTTP layer: server-rendered pages and a JSON API over
-// the same core.Service. Handlers translate HTTP to service calls and back;
-// they make no authorization decisions of their own.
+// Package web is the JSON API over core.Service. The user interface is the
+// Next.js app in src/frontend, which talks to this API like any other client.
+// Handlers translate HTTP to service calls and back; they make no
+// authorization decisions of their own.
 package web
 
 import (
@@ -9,27 +10,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
-	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"dogfood/src/core"
 )
 
-//go:embed templates/*.html static/*
+//go:embed static/openapi.yaml
 var assets embed.FS
 
 const sessionCookie = "dogfood_session"
 
 type Config struct {
-	SecureCookies bool // set when served over HTTPS
-	TrustProxy    bool // honour X-Forwarded-For (only behind a proxy you control)
-	PublicURL     string
+	SecureCookies bool   // set when served over HTTPS
+	TrustProxy    bool   // honour X-Forwarded-For from any peer (only behind a proxy you control)
+	PublicURL     string // base for links the API builds (invites, activations)
+	FrontendURL   string // Next.js server to proxy non-API paths to; empty = API only
 }
 
 type Server struct {
@@ -37,15 +35,11 @@ type Server struct {
 	cfg     Config
 	log     *slog.Logger
 	limiter *core.RateLimiter
-	pages   map[string]*template.Template
+	trusted *hostSet // the frontend's addresses, whose X-Forwarded-For is trusted
 }
 
 func New(svc *core.Service, cfg Config, log *slog.Logger) (*Server, error) {
-	s := &Server{svc: svc, cfg: cfg, log: log, limiter: core.NewRateLimiter()}
-	if err := s.loadTemplates(); err != nil {
-		return nil, err
-	}
-	return s, nil
+	return &Server{svc: svc, cfg: cfg, log: log, limiter: core.NewRateLimiter()}, nil
 }
 
 type ctxKey int
@@ -67,10 +61,7 @@ func tokenOf(r *http.Request) (token string, fromCookie bool) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	s.htmlRoutes(mux)
 	s.apiRoutes(mux)
-	static, _ := fs.Sub(assets, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(http.FileServerFS(static), time.Hour)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.svc.DB.PingContext(r.Context()); err != nil {
 			http.Error(w, "db unavailable", http.StatusServiceUnavailable)
@@ -78,27 +69,23 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Write([]byte("ok\n"))
 	})
-	return s.recoverer(s.logRequests(s.securityHeaders(s.authenticate(s.globalRateLimit(mux)))))
-}
-
-func cacheFor(h http.Handler, d time.Duration) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(d.Seconds())))
-		h.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) clientIP(r *http.Request) string {
-	if s.cfg.TrustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
-		}
+	api := s.recoverer(s.logRequests(s.securityHeaders(s.authenticate(s.globalRateLimit(mux)))))
+	if s.cfg.FrontendURL == "" {
+		return api
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ui, err := s.frontendProxy()
 	if err != nil {
-		return r.RemoteAddr
+		s.log.Error("bad frontend URL; serving the API only", "url", s.cfg.FrontendURL, "err", err)
+		return api
 	}
-	return host
+	root := http.NewServeMux()
+	root.Handle("/api/", api)
+	root.Handle("/.well-known/", api)
+	root.Handle("/healthz", api)
+	// Page loads are not rate limited here: each one becomes server-side API
+	// calls that are, keyed on the real client address.
+	root.Handle("/", s.recoverer(ui))
+	return root
 }
 
 // authenticate resolves the caller from a bearer token or the session cookie.
@@ -132,10 +119,6 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 
 func (s *Server) globalRateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/static/") {
-			next.ServeHTTP(w, r)
-			return
-		}
 		if !s.limiter.Allow("global:"+s.clientIP(r), 600, time.Minute) {
 			s.fail(w, r, &core.Error{Kind: core.KindTooMany, Code: "rate_limited", Message: "too many requests; slow down"})
 			return
@@ -162,13 +145,8 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
-		if strings.HasPrefix(r.URL.Path, "/embed/") {
-			// The gallery widget is meant to be framed by other sites.
-			h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors *")
-		} else {
-			h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; form-action 'self'")
-			h.Set("X-Frame-Options", "DENY")
-		}
+		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		h.Set("X-Frame-Options", "DENY")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -194,9 +172,6 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r)
-		if strings.HasPrefix(r.URL.Path, "/static/") {
-			return
-		}
 		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", sw.status, "ms", time.Since(start).Milliseconds())
 	})
 }
@@ -242,24 +217,14 @@ func errorBody(err error) (code, msg string) {
 	return "internal", "something went wrong"
 }
 
-// fail reports err as JSON for /api/ paths and as a page otherwise.
+// fail reports err as a JSON error body with the mapped status code.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	status := statusFor(err)
 	if status == http.StatusInternalServerError {
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/.well-known/") {
-		code, msg := errorBody(err)
-		writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
-		return
-	}
-	if status == http.StatusUnauthorized {
-		http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
-		return
-	}
-	_, msg := errorBody(err)
-	w.WriteHeader(status)
-	s.render(w, r, "error", map[string]any{"Status": status, "StatusText": http.StatusText(status), "Message": msg})
+	code, msg := errorBody(err)
+	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

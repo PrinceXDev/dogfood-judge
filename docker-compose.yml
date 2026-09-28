@@ -1,21 +1,36 @@
 # docker compose up  ->  http://localhost:8080, seeded with the DOGFOOD fixtures.
-# No cloud accounts, no hosted database, no external APIs: one container, one
-# SQLite file in a named volume. `docker compose down -v` resets to a fresh seed.
+# No cloud accounts, no hosted database, no external APIs: two containers and
+# one SQLite file in a named volume. `docker compose down -v` resets to a fresh seed.
+#
+#   browser / curl / run.py ──► api :8080 (Go) ──┬─ /api, /.well-known, /healthz: answered here
+#                                                 └─ everything else ──► web :3000 (Next.js)
+#   web renders pages by calling api:8080/api/v1 server-side.
 services:
-  dogfood:
+  api:
     build: .
-    image: dogfood:local
+    image: dogfood-api:local
     ports:
       - "8080:8080"
     volumes:
       - dogfood-data:/data
     environment:
+      DOGFOOD_FRONTEND_URL: "http://web:3000"
       # Demo mode installs known passwords and API tokens (see README). Set to 0 for a real event.
       DOGFOOD_DEMO: "1"
-      # Set when serving behind HTTPS / a reverse proxy you control:
+      # Behind HTTPS / your own reverse proxy:
       # DOGFOOD_PUBLIC_URL: "https://judge.example.org"
       # DOGFOOD_SECURE_COOKIES: "1"
       # DOGFOOD_TRUST_PROXY: "1"
+    restart: unless-stopped
+
+  web:
+    build: ./src/frontend
+    image: dogfood-web:local
+    environment:
+      API_URL: "http://api:8080"
+      # DOGFOOD_SECURE_COOKIES: "1"
+    depends_on:
+      - api
     restart: unless-stopped
 
 volumes:

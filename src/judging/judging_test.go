@@ -214,3 +214,96 @@ func TestSimulationModelBeatsRawOnFixtureGraph(t *testing.T) {
 		t.Fatalf("bias+scale model (%.3f) should beat raw means (%.3f)", byM[MethodBiasScale].KendallMean, byM[MethodRaw].KendallMean)
 	}
 }
+
+// A planted rogue review (a judge scoring one strong project at the floor)
+// must be flagged, attributed to the right judge, and shown to cost ranks.
+func TestOutlierFindsPlantedRogueReview(t *testing.T) {
+	rng := rand.New(rand.NewPCG(9, 9))
+	var reviews []Review
+	quality := map[string]float64{}
+	for p := 0; p < 24; p++ {
+		quality[string(rune('A'+p))] = 0.8 * rng.NormFloat64()
+	}
+	quality["A"] = 2 // clearly the best
+	judges := []string{"j1", "j2", "j3", "j4", "j5", "j6", "j7", "j8"}
+	for p, q := range quality {
+		for k := 0; k < 4; k++ {
+			j := judges[rng.IntN(len(judges))]
+			if p == "A" {
+				j = judges[k]
+			}
+			reviews = append(reviews, Review{j, p, 3 + q + 0.2*rng.NormFloat64()})
+		}
+	}
+	for i := range reviews {
+		if reviews[i].Project == "A" && reviews[i].Judge == "j1" {
+			reviews[i].Score = 0.5 // the rogue review
+		}
+	}
+	rep := Analyze(reviews, 3, Options{Bootstrap: 50})
+	found := false
+	for _, o := range rep.Outliers {
+		if o.Judge == "j1" && o.Project == "A" {
+			found = true
+			if o.RankWithout > o.RankWith {
+				t.Fatalf("removing the rogue review should not hurt A: %d -> %d", o.RankWith, o.RankWithout)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("rogue review not flagged; outliers: %+v", rep.Outliers)
+	}
+	if rep.Robustness == nil || rep.Robustness.Refits != len(judges) {
+		t.Fatalf("expected %d leave-one-judge-out refits, got %+v", len(judges), rep.Robustness)
+	}
+}
+
+func TestRobustnessOnFixture(t *testing.T) {
+	rep := Analyze(loadFixtureReviews(t), 3, Options{Bootstrap: 100})
+	rb := rep.Robustness
+	if rb == nil || rb.Refits != 30 {
+		t.Fatalf("expected 30 refits: %+v", rb)
+	}
+	if rb.WinnerHeld+len(rb.WinnerFlips) != rb.Refits {
+		t.Fatal("winner accounting does not add up")
+	}
+	t.Logf("winner %s held %d/%d, flips %v; top-3 held %d/%d; pivotal %s tau %.3f; margin %.2f SE",
+		rb.Winner, rb.WinnerHeld, rb.Refits, rb.WinnerFlips, rb.TopKHeld, rb.Refits, rb.Pivotal, rb.PivotalTau, rb.WinnerMargin)
+	for _, o := range rep.Outliers {
+		t.Logf("outlier %s on %s: %.2f vs expected %.2f (z %.2f), rank %d -> %d without", o.Judge, o.Project, o.Score, o.Expected, o.Z, o.RankWith, o.RankWithout)
+	}
+	tb := Tiebreak(rep, 5, 0.05, 0.95)
+	for _, p := range tb {
+		t.Logf("tiebreak candidate %s P(top3)=%.2f", p.Project, p.ProbTopK)
+	}
+}
+
+// The landing-page simulation must be bounded, deterministic, and recover the
+// truth better than the raw mean when judges differ strongly in leniency.
+func TestDemo(t *testing.T) {
+	big := DemoConfig{Projects: 999, Judges: 999, Coverage: 99, Leniency: 9, Scale: 9, Noise: -1}.Clamp()
+	if big.Projects != 40 || big.Judges != 16 || big.Coverage != 6 || big.Leniency != 1.5 || big.Noise != 0.05 {
+		t.Fatalf("clamp: %+v", big)
+	}
+	cfg := DemoConfig{Projects: 24, Judges: 8, Coverage: 3, Leniency: 1.0, Scale: 0.3, Noise: 0.5, Seed: 3}
+	a, b := Demo(cfg, 40), Demo(cfg, 40)
+	if len(a.Reviews) != 72 || a.Report.Robustness == nil || a.Report.Robustness.Refits != 8 {
+		t.Fatalf("reviews %d, robustness %+v", len(a.Reviews), a.Report.Robustness)
+	}
+	if a.Report.Projects[0].Project != b.Report.Projects[0].Project || a.Accuracy != b.Accuracy {
+		t.Fatal("demo is not deterministic for a fixed seed")
+	}
+	if a.Report.Components != 1 {
+		t.Fatalf("review graph split into %d components", a.Report.Components)
+	}
+	better := 0
+	for seed := uint64(1); seed <= 10; seed++ {
+		cfg.Seed = seed
+		if acc := Demo(cfg, -1).Accuracy; acc.AdjustedTau > acc.RawTau {
+			better++
+		}
+	}
+	if better < 7 {
+		t.Fatalf("normalization beat the raw mean in only %d/10 lenient worlds", better)
+	}
+}
