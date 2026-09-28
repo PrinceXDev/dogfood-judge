@@ -370,6 +370,9 @@ type ProjectResult struct {
 	ProbTopK    float64            `json:"prob_top_k"`
 	RankChange  int                `json:"rank_change"` // raw rank minus adjusted rank (+ = moved up)
 	Provisional bool               `json:"provisional"` // fewer reviews than requested
+	// AheadOfNext is the bootstrap probability that this project really
+	// outranks the one listed directly below it; near 0.5 is a statistical tie.
+	AheadOfNext float64 `json:"ahead_of_next"`
 }
 
 type JudgeResult struct {
@@ -381,6 +384,14 @@ type JudgeResult struct {
 	BiasSE    float64  `json:"bias_se"`
 	Scale     float64  `json:"scale"`
 	Flags     []string `json:"flags"`
+	// Agreement is the correlation between this judge's scores and the
+	// consensus computed WITHOUT them (NaN-free; 0 when under 3 reviews).
+	Agreement  float64 `json:"agreement"`
+	HasAgree   bool    `json:"has_agreement"`
+	Influence  float64 `json:"influence"` // 1 - Kendall tau between the full ranking and the ranking without this judge
+	Outliers   int     `json:"outliers"`  // reviews by this judge flagged as outliers
+	FlipsTopK  int     `json:"flips_top_k"`
+	FlipsFirst bool    `json:"flips_first"`
 }
 
 type Report struct {
@@ -394,6 +405,8 @@ type Report struct {
 	TopK       int                `json:"top_k"`
 	Bootstrap  int                `json:"bootstrap"`
 	Reviews    int                `json:"reviews"`
+	Robustness *Robustness        `json:"robustness,omitempty"`
+	Outliers   []*OutlierReview   `json:"outliers"`
 }
 
 type FitSummary struct {
@@ -461,6 +474,7 @@ func Analyze(reviews []Review, wantReviews int, opt Options) *Report {
 	rep.Judges = judgeDiagnostics(reviews, full)
 	rep.Components = Components(reviews)
 	bootstrap(rep, reviews, full, opt)
+	robustness(rep, reviews, full, opt)
 	return rep
 }
 
@@ -513,6 +527,7 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 	rng := rand.New(rand.NewPCG(opt.Seed, 0x9e3779b97f4a7c15))
 	rankSamples := map[string][]int{}
 	top := map[string]int{}
+	ahead := make([]int, len(rep.Projects))
 	quick := opt
 	quick.Bootstrap = -1
 	quick.init, quick.maxSweeps, quick.tol = full, 300, 1e-6
@@ -535,6 +550,11 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 				top[p]++
 			}
 		}
+		for i := 0; i+1 < len(rep.Projects); i++ {
+			if adj[rep.Projects[i].Project] > adj[rep.Projects[i+1].Project] {
+				ahead[i]++
+			}
+		}
 	}
 	for _, p := range rep.Projects {
 		rs := rankSamples[p.Project]
@@ -542,6 +562,9 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 		p.RankLow = rs[int(0.05*float64(len(rs)))]
 		p.RankHigh = rs[int(math.Min(0.95*float64(len(rs)), float64(len(rs)-1)))]
 		p.ProbTopK = float64(top[p.Project]) / float64(opt.Bootstrap)
+	}
+	for i := 0; i+1 < len(rep.Projects); i++ {
+		rep.Projects[i].AheadOfNext = float64(ahead[i]) / float64(opt.Bootstrap)
 	}
 }
 

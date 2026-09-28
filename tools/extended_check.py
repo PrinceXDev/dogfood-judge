@@ -8,8 +8,12 @@ request is read-only or one the portal must refuse, so running it does not
 change the portal's data.
 
 Usage:  python3 tools/extended_check.py .dogfood.toml > extended-report.txt
+
+The BONUS lines cover the judging engine beyond the tiers: leave-one-judge-out
+robustness, judge diagnostics, and the signed, reproducible results bundle.
 """
 
+import base64
 import datetime
 import json
 import sys
@@ -173,8 +177,38 @@ def main():
     s, _, _ = request(base, "/api/v1/import", org, method="POST", body={"event": {}})
     check("T4", "bulk import restricted to admins", s == 403, f"got {s}, wanted 403")
 
+    # --- judging engine (bonus) --------------------------------------------
+    s, b, _ = request(base, f"/api/v1/events/{EVENT}/results", org)
+    try:
+        res = json.loads(b)
+        rb = res["report"]["robustness"]
+        ok = s == 200 and rb["refits"] == 30 and rb["winner_held"] + len(rb["winner_flips"] or []) == 30
+    except Exception:  # noqa: BLE001
+        res, ok = {}, False
+    check("BONUS", "leave-one-judge-out robustness (30 refits)", ok, f"got {s}")
+
+    try:
+        flat = [j for j in res["judges"] if j["judge"] == "jdg_07"][0]
+        ok = any(f.startswith("flat") for f in flat["flags"])
+    except Exception:  # noqa: BLE001
+        ok = False
+    check("BONUS", "flat judge jdg_07 flagged", ok, "jdg_07 gave (4,4,4) to every project")
+
+    s, b, _ = request(base, f"/api/v1/events/{EVENT}/results/bundle", org)
+    try:
+        d = json.loads(b)
+        m = json.loads(base64.b64decode(d["manifest"]["payload"]))
+        ok = (s == 200 and m["type"] == "dogfood.results/v1" and len(m["input_digest"]) == 64
+              and len(m["ranking"]) == 40 and all(r["judge"].startswith("J-") for r in d["inputs"]["reviews"]))
+    except Exception:  # noqa: BLE001
+        ok = False
+    check("BONUS", "signed, pseudonymized results bundle", ok, f"got {s}")
+
+    s, _, _ = request(base, f"/api/v1/events/{EVENT}/results/bundle", jb)
+    check("BONUS", "unpublished bundle refused to judges", s == 403, f"got {s}, wanted 403")
+
     # --- report ------------------------------------------------------------
-    print("DOGFOOD extended acceptance report (T3, T4)")
+    print("DOGFOOD extended acceptance report (T3, T4, judging engine)")
     print(f"portal: {base}")
     print()
     width = max(len(c[1]) for c in checks) + 2
@@ -184,7 +218,7 @@ def main():
         if not ok and detail:
             print(f"       {detail}")
     print()
-    for tier in ("T3", "T4"):
+    for tier in ("T3", "T4", "BONUS"):
         results = [c[2] for c in checks if c[0] == tier and c[2] is not None]
         print(f"{tier}: {sum(results)}/{len(results)} checks passed")
     return 0

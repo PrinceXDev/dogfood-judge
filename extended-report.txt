@@ -1,26 +1,31 @@
-DOGFOOD extended acceptance report (T3, T4)
+DOGFOOD extended acceptance report (T3, T4, judging engine)
 portal: http://localhost:8080
 
-T3  voting requires an account ............ PASS
-T3  no voting for your own project ........ PASS
-T3  results hidden during voting .......... PASS
-T3  publishing refused while voting open .. PASS
-T3  ballot order randomized per voter ..... PASS
-T3  project comments are readable ......... PASS
-T3  commenting requires an account ........ PASS
-T3  duplicate submission detected ......... PASS
-T3  audit trail readable and verifies ..... PASS
-T3  audit trail refused to judges ......... PASS
-T3  login attempts are rate limited ....... PASS
-T4  OpenAPI spec published ................ PASS
-T4  REST API lists events ................. PASS
-T4  webhooks managed by organizers only ... PASS
-T4  record signing key published .......... PASS
-T4  forged record rejected ................ PASS
-T4  participant certificate issued ........ PASS
-T4  embeddable gallery widget ............. PASS
-T4  bulk export (fixtures format) ......... PASS
-T4  bulk import restricted to admins ...... PASS
+T3  voting requires an account .................. PASS
+T3  no voting for your own project .............. PASS
+T3  results hidden during voting ................ PASS
+T3  publishing refused while voting open ........ PASS
+T3  ballot order randomized per voter ........... PASS
+T3  project comments are readable ............... PASS
+T3  commenting requires an account .............. PASS
+T3  duplicate submission detected ............... PASS
+T3  audit trail readable and verifies ........... PASS
+T3  audit trail refused to judges ............... PASS
+T3  login attempts are rate limited ............. PASS
+T4  OpenAPI spec published ...................... PASS
+T4  REST API lists events ....................... PASS
+T4  webhooks managed by organizers only ......... PASS
+T4  record signing key published ................ PASS
+T4  forged record rejected ...................... PASS
+T4  participant certificate issued .............. PASS
+T4  embeddable gallery widget ................... PASS
+T4  bulk export (fixtures format) ............... PASS
+T4  bulk import restricted to admins ............ PASS
+BONUS  leave-one-judge-out robustness (30 refits) .. PASS
+BONUS  flat judge jdg_07 flagged ................... PASS
+BONUS  signed, pseudonymized results bundle ........ PASS
+BONUS  unpublished bundle refused to judges ........ PASS
 
 T3: 11/11 checks passed
 T4: 9/9 checks passed
+BONUS: 4/4 checks passed

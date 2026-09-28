@@ -30,6 +30,7 @@ tags:
   - name: portability
   - name: webhooks
   - name: records
+  - name: public
 
 paths:
   /auth/login:
@@ -71,6 +72,14 @@ paths:
       summary: Invalidate the current session.
       responses: { "204": { description: Done } }
   /activate/{token}:
+    get:
+      tags: [auth]
+      security: []
+      summary: The account an activation link belongs to (email and name).
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Account, content: { application/json: { schema: { type: object, properties: { email: { type: string }, name: { type: string } } } } } }
+        "404": { $ref: "#/components/responses/Error" }
     post:
       tags: [auth]
       security: []
@@ -540,6 +549,61 @@ paths:
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/SignedRecord" } } } }
       responses: { "200": { description: Verdict, content: { application/json: { schema: { type: object, properties: { valid: { type: boolean }, payload: { type: object }, reason: { type: string } } } } } } }
 
+  /stats:
+    get:
+      tags: [public]
+      security: []
+      summary: Instance-wide counts over public events (events, projects, judges, reviews, comparisons, audit entries). No scores or names.
+      responses: { "200": { description: Counts } }
+  /demo/simulate:
+    get:
+      tags: [public]
+      security: []
+      summary: Run the real judging engine on one synthetic hackathon, for education. Returns the ground truth, the generated reviews, the full analysis report and its accuracy against the truth.
+      description: Parameters are clamped (projects 6–40, judges 3–16, coverage 2–6). Results are cached per parameter set; uncached fits are rate limited.
+      parameters:
+        - { name: projects, in: query, schema: { type: integer, default: 24 } }
+        - { name: judges, in: query, schema: { type: integer, default: 8 } }
+        - { name: coverage, in: query, description: Reviews per project, schema: { type: integer, default: 3 } }
+        - { name: leniency, in: query, description: SD of judge leniency in scale points, schema: { type: number, default: 0.5 } }
+        - { name: scale, in: query, description: Log-normal SD of judge scale use, schema: { type: number, default: 0.35 } }
+        - { name: noise, in: query, description: Per-criterion noise SD, schema: { type: number, default: 0.6 } }
+        - { name: seed, in: query, schema: { type: integer, default: 0 } }
+      responses: { "200": { description: Simulation }, "429": { $ref: "#/components/responses/Error" } }
+
+  /events/{event}/assignments/tiebreak:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    post:
+      tags: [judging]
+      summary: Add one reviewer to each of up to `max` projects whose P(top k) is between 5% and 95% (organizers).
+      requestBody: { content: { application/json: { schema: { type: object, properties: { max: { type: integer, default: 5 } } } } } }
+      responses: { "200": { description: Candidates and the assignment report } }
+  /events/{event}/results/bundle:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [results]
+      security: [{}, { bearer: [] }]
+      summary: Verifiable results bundle. Pseudonymized inputs plus a signed manifest (fingerprint, audit anchor, ranking). Public after publication.
+      description: Verify offline with `dogfood verify-results bundle.json --key <public key>`.
+      responses:
+        "200": { description: Bundle, content: { application/json: { schema: { $ref: "#/components/schemas/ResultsBundle" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /events/{event}/all-projects:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [projects]
+      summary: Every project including drafts, duplicates and disqualified (organizers).
+      responses: { "200": { description: Projects, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Project" } } } } } }
+  /events/{event}/comments:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get: { tags: [voting], summary: Every comment in the event, hidden ones included (organizers)., responses: { "200": { description: Comments } } }
+  /invitations/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get: { tags: [events], security: [], summary: What an invitation is for (role, event, expiry)., responses: { "200": { description: Invitation }, "404": { $ref: "#/components/responses/Error" }, "409": { $ref: "#/components/responses/Error" } } }
+  /teams/invite/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get: { tags: [teams], security: [], summary: Preview of a team invite link (team name and member names only)., responses: { "200": { description: Team preview } } }
+
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer }
@@ -732,6 +796,18 @@ components:
         payload: { type: string, description: Base64 of the exact signed JSON bytes. }
         signature: { type: string, description: Base64 Ed25519 signature. }
         key_id: { type: string }
+    ResultsBundle:
+      type: object
+      properties:
+        manifest: { $ref: "#/components/schemas/SignedRecord" }
+        inputs:
+          type: object
+          properties:
+            event_id: { type: string }
+            reviews_per_project: { type: integer }
+            criteria: { type: array, items: { type: object, properties: { key: { type: string }, weight: { type: number } } } }
+            reviews: { type: array, items: { type: object, properties: { judge: { type: string, description: Pseudonym }, project: { type: string }, values: { type: object, additionalProperties: { type: integer } } } } }
+            excluded: { type: array, items: { type: string } }
     RecordResponse:
       type: object
       properties:

@@ -10,10 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
-	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -120,58 +117,6 @@ func (p *portal) signup(email, name string) string {
 	var out struct{ Token string }
 	p.must(p.api("POST", "/api/v1/auth/signup", "", map[string]string{"email": email, "name": name, "password": "correct horse battery"}), 201).JSON(p.t, &out)
 	return out.Token
-}
-
-// browser is a cookie-carrying client that fills forms like a user would.
-type browser struct {
-	p      *portal
-	client *http.Client
-}
-
-func (p *portal) browser() *browser {
-	jar, _ := cookiejar.New(nil)
-	return &browser{p: p, client: &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}}
-}
-
-func (b *browser) get(path string) resp {
-	b.p.t.Helper()
-	res, err := b.client.Get(b.p.srv.URL + path)
-	if err != nil {
-		b.p.t.Fatal(err)
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
-	return resp{res.StatusCode, string(body), res.Header}
-}
-
-var csrfRe = regexp.MustCompile(`name="csrf" value="([0-9a-f]+)"`)
-
-// post submits a form, adding the CSRF token scraped from fromPage.
-func (b *browser) post(fromPage, action string, form url.Values) resp {
-	b.p.t.Helper()
-	if fromPage != "" {
-		page := b.get(fromPage)
-		if m := csrfRe.FindStringSubmatch(page.Body); m != nil {
-			form.Set("csrf", m[1])
-		}
-	}
-	res, err := b.client.PostForm(b.p.srv.URL+action, form)
-	if err != nil {
-		b.p.t.Fatal(err)
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
-	return resp{res.StatusCode, string(body), res.Header}
-}
-
-func (b *browser) login(email, password string) {
-	b.p.t.Helper()
-	r := b.post("", "/login", url.Values{"email": {email}, "password": {password}, "next": {"/"}})
-	if r.Status != http.StatusSeeOther {
-		b.p.t.Fatalf("login failed: %d %s", r.Status, r.Body)
-	}
 }
 
 // openEvent creates an event (as admin) whose submissions are open now.

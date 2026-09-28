@@ -10,7 +10,8 @@ go test ./src/judging/                             # unit tests for the maths
 ```
 
 The code is in `src/judging/` (no database, no HTTP, so it can be tested and
-read on its own): `normalize.go`, `bt.go`, `assign.go`, `sim.go`.
+read on its own): `normalize.go`, `robust.go`, `bt.go`, `assign.go`, `sim.go`.
+Verifiable results live in `src/core/verify.go`.
 
 ---
 
@@ -59,6 +60,27 @@ assignments (load 2–11).
 formulation would give provably optimal load balance, but connectivity is not
 a flow objective. The report exposes load and connectivity so the organizer
 can judge the result.
+
+### 1.1 Tie-breaker rounds: reviews where they change the outcome
+
+Uniform coverage (every project gets k reviews) is the right *first*
+round. It is the wrong second round. Once scores exist, most projects are
+already settled: P(top 3) is essentially 0% or 100%, and another review of
+them cannot change a prize. The **Add tie-breaker reviews** action
+(`judging.Tiebreak` → `core.RunTiebreak`) instead:
+
+1. takes the current bootstrap P(top k) for every project (§3.5);
+2. keeps only projects with 5% < P(top k) < 95%, the ones whose prize outcome
+   is genuinely uncertain;
+3. orders them by |P − ½|, so coin flips come first;
+4. adds **one** extra reviewer to each of up to 5, using the same assignment
+   engine and rules (track match, conflicts, load, connectivity), with the
+   reason recorded as e.g. *"tie-breaker: P(top 3) = 49%"*.
+
+It is adaptive design applied to ratings: the same idea as pairwise mode's
+next-pair choice (§5), one level up. On the fixture it selects prj_37
+(P = 49%), prj_11 (55%), prj_34 (65%), prj_25 (24%) and prj_08 (20%), which
+are exactly the projects fighting over the podium.
 
 ---
 
@@ -217,6 +239,64 @@ Headline facts:
 | **`biasscale`** | **Primary.** Leniency and scale. |
 | `pairwise` | Bradley–Terry on *induced* comparisons: every pair of projects one judge scored becomes a win, loss or tie. Leniency and scale cancel within a judge, so this is an independent, assumption-light cross-check. It is noisy because each judge sees few projects. |
 
+### 3.9 Is the winner defensible? Leave-one-judge-out
+
+Losing teams do not ask "was the model right?". They ask "would we have won
+with different judges?". The portal answers that directly
+(`judging/robust.go`). Every judge is removed in turn, and the **whole model
+is refitted** without their reviews. The report shows:
+
+- **Winner held**: in how many of the J refits the winner stays first, and
+  exactly which judges' removal changes it.
+- **Top-k held**: the same for the whole prize set.
+- **Winner margin**: the first–second gap divided by their combined standard
+  error. Below 1 it is a statistical tie, whatever the ordinal rank says.
+- **Ahead of next**: for every adjacent pair in the ranking, the share of
+  bootstrap resamples in which the higher one really stays higher. Near 50%
+  means the two are indistinguishable, and the UI tags it *tie*.
+- **Judge influence**: 1 − τ between the full ranking and the ranking without
+  that judge, plus a *decides #1* tag if their removal flips the winner.
+
+**On the fixture**, the honest answer is uncomfortable:
+
+- The winner, prj_11, stays first in **24 of 30** refits.
+- Removing any one of six judges (jdg_02, 04, 16, 20, 29, 30) changes it.
+- The lead over prj_34 is **0.05 standard errors**.
+- The most influential judge is jdg_24; without them the ranking agrees with
+  the full one at τ = 0.78.
+
+Every other platform would have printed "1st: Salt Ledger" and moved on. This
+one tells the organizer that first place is a coin flip between two projects.
+It offers the tie-breaker round (§1.1) or a shared prize.
+
+### 3.10 Reviews that disagree with everyone
+
+The model predicts every review: what *this* judge, given their leniency and
+scale, should give *this* project, given what every other judge said:
+
+$$\hat x_{jp} = \hat\mu + \hat b_j + \hat s_j \hat q_p, \qquad z_{jp} = (x_{jp} - \hat x_{jp})/\hat\sigma$$
+
+Reviews with |z| ≥ 2.5 are flagged. For each one the model is refitted
+**without that single review**, and the report shows the project's rank with
+and without it: "this one review is worth 10 places" is something an
+organizer can act on. Under the model about 1.2% of honest reviews cross the
+threshold by chance, so on a 120-review event one or two flags are expected
+from noise. The UI calls them prompts to read the review, not accusations.
+The unit test plants a rogue review (a judge scoring the clear best project
+at the floor) and checks that it is flagged, attributed to the right judge,
+and shown to cost the project ranks.
+
+Each judge also gets an **agreement** score: the correlation between their
+scores and the consensus computed *without them* (from the leave-one-judge-out
+fit, so a judge cannot agree with themselves). A negative agreement over 3 or
+more reviews is flagged *contrarian*. This is the portal's answer to targeted
+favouritism and collusion (THREAT-MODEL.md): a judge who inflates a friend
+does not look lenient overall, but their review of that project is an
+outlier, and it is shown with its price in ranks.
+
+On the fixture no review crosses 2.5σ. The fixture's scores are noisy but
+not adversarial, and the report says so rather than inventing suspects.
+
 ---
 
 ## 4. Does it work? Monte Carlo validation
@@ -325,14 +405,63 @@ next step once an event has an order of magnitude more comparisons.
 | Judge diagnostics (leniency, flags) | – | – | – | ✓ |
 | Vote tallies | after publish | after publish | after publish | always |
 
-All of this is enforced in `src/core` (the service layer), which both the
-pages and the API call. `tests/portal_test.go: TestAuthorizationMatrix`
-checks 39 (endpoint, role) pairs. Publishing is refused while community
-voting is open, and judging closes when results are published.
+All of this is enforced in `src/core` (the service layer). The Next.js
+interface is just another API client, so it cannot bypass it.
+`tests/portal_test.go: TestAuthorizationMatrix` checks 39 (endpoint, role)
+pairs. Publishing is refused while community voting is open, and judging
+closes when results are published.
 
 ---
 
-## 7. Limitations
+## 7. Verifiable results: don't trust the organizer's screen
+
+A normalized ranking is a computation, so it should be *checkable*: anyone
+can re-run it offline, on the same inputs, and get the same answer. Once
+results are published, `GET /api/v1/events/{e}/results/bundle` (linked from
+the public results page) returns:
+
+- **inputs**: every review's raw criterion values and the rubric weights.
+  Judges are replaced by keyed pseudonyms (`J-3f9c…`, stable within the event,
+  not reversible without the instance secret), so the bundle exposes
+  scores, not who gave them. Duplicates and disqualified projects are listed
+  as excluded.
+- **a manifest signed with the instance's Ed25519 key**, committing to:
+  - the SHA-256 of the canonical inputs;
+  - the hash of the `results.publish` entry in the audit chain, which ties
+    the ranking to the tamper-evident log;
+  - the engine version and priors;
+  - the full ranking with adjusted scores.
+
+`dogfood verify-results bundle.json --key <public key>` then:
+
+1. checks the signature;
+2. recomputes the input fingerprint;
+3. recomputes every composite from the raw values and weights;
+4. re-runs the exact engine (`core.RankInputs`, the same function the portal
+   used to write the manifest).
+
+```
+OK   signature (key 7d7a383e43e39e4b)
+OK   input fingerprint 05e7994c2a33…
+OK   ranking re-computed from 123 reviews (max score difference 0)
+VERIFIED: the published ranking follows from the published inputs.
+```
+
+Changing a single criterion value fails the fingerprint, and the recomputed
+ranking reports how far scores moved. Changing the manifest fails the
+signature. Scores must agree to 10⁻⁶, because floating-point summation can
+differ in the last bits across CPU architectures, and any rank difference
+must be explained by such a near-exact tie. `TestVerifiableResultsBundle`
+covers the genuine, tampered-input and forged-manifest cases.
+
+What this proves: the published ranking follows from the published inputs
+under the published method. What it cannot prove: that the inputs are what
+judges actually entered. That is what the audit chain is for, and the
+manifest's anchor ties the two together.
+
+---
+
+## 8. Limitations
 
 - The model assumes leniency is additive and constant within an event. A
   judge who is harsh early and lenient late is modelled as their average.

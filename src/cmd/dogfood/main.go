@@ -4,6 +4,7 @@
 //	dogfood normalize [fixtures.json]  print the normalization proof report
 //	dogfood simulate [fixtures.json]   Monte Carlo validation of every method
 //	dogfood verify-record FILE --key B64
+//	dogfood verify-results BUNDLE --key B64  reproduce a published ranking offline
 //	dogfood export EVENT > event.json  /  dogfood import event.json
 //	dogfood set-password EMAIL
 package main
@@ -66,6 +67,8 @@ func main() {
 		err = simulate(args)
 	case "verify-record":
 		err = verifyRecord(args)
+	case "verify-results":
+		err = verifyResults(args)
 	case "export":
 		err = export(args)
 	case "import":
@@ -73,7 +76,7 @@ func main() {
 	case "set-password":
 		err = setPassword(args)
 	case "help", "-h", "--help":
-		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|export|import|set-password]")
+		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|verify-results|export|import|set-password]")
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
@@ -118,6 +121,7 @@ func serve() error {
 		SecureCookies: envBool("DOGFOOD_SECURE_COOKIES", false),
 		TrustProxy:    envBool("DOGFOOD_TRUST_PROXY", false),
 		PublicURL:     os.Getenv("DOGFOOD_PUBLIC_URL"),
+		FrontendURL:   os.Getenv("DOGFOOD_FRONTEND_URL"),
 	}, log)
 	if err != nil {
 		return err
@@ -419,5 +423,67 @@ func setPassword(args []string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "password updated")
+	return nil
+}
+
+// verifyResults re-runs the scoring engine on a published results bundle.
+func verifyResults(args []string) error {
+	fs := flag.NewFlagSet("verify-results", flag.ExitOnError)
+	key := fs.String("key", "", "base64 Ed25519 public key (from /.well-known/dogfood-signing-key)")
+	// Allow the key flag after the file name, as the docs show it.
+	var files []string
+	for len(args) > 0 {
+		fs.Parse(args)
+		if fs.NArg() == 0 {
+			break
+		}
+		files = append(files, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
+	if len(files) != 1 || *key == "" {
+		return errors.New("usage: dogfood verify-results bundle.json --key BASE64")
+	}
+	pub, err := base64.StdEncoding.DecodeString(*key)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return errors.New("--key is not a base64 Ed25519 public key")
+	}
+	b, err := os.ReadFile(files[0])
+	if err != nil {
+		return err
+	}
+	var bundle core.ResultsBundle
+	if err := json.Unmarshal(b, &bundle); err != nil {
+		return fmt.Errorf("not a results bundle: %w", err)
+	}
+	v := core.VerifyBundle(ed25519.PublicKey(pub), bundle)
+	mark := func(ok bool) string {
+		if ok {
+			return "OK  "
+		}
+		return "FAIL"
+	}
+	fmt.Printf("%s signature (key %s)\n", mark(v.Signature), core.KeyID(pub))
+	fmt.Printf("%s input fingerprint %s\n", mark(v.Digest), core.InputDigest(bundle.Inputs))
+	fmt.Printf("%s ranking re-computed from %d reviews (max score difference %.2g)\n", mark(v.Reproduced), len(bundle.Inputs.Reviews), v.MaxDelta)
+	for _, p := range v.Problems {
+		fmt.Println("     -", p)
+	}
+	if v.Manifest != nil && len(v.Manifest.Ranking) > 0 {
+		when := "unpublished preview"
+		if v.Manifest.PublishedAt != "" {
+			when = "published " + v.Manifest.PublishedAt
+		}
+		fmt.Printf("\n%s (%s, engine %s)\n", v.Manifest.EventName, when, v.Manifest.Engine)
+		for i, e := range v.Manifest.Ranking {
+			if i == 5 {
+				break
+			}
+			fmt.Printf("  %d. %s (%s) %.3f\n", e.Rank, e.Title, e.Project, e.Adjusted)
+		}
+	}
+	if !v.Signature || !v.Digest || !v.Reproduced {
+		return errors.New("results NOT verified")
+	}
+	fmt.Println("\nVERIFIED: the published ranking follows from the published inputs.")
 	return nil
 }

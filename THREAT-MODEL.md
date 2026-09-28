@@ -81,6 +81,31 @@ ballot stuffing by one account; the rest is about many accounts:
   runs on import and on demand; flagged projects leave the gallery and the
   model but keep their reviews. On the fixture it catches prj_41.
 
+### Spoofed client addresses (dodging per-IP limits)
+- The Go server is the network edge. It serves the API itself and
+  reverse-proxies pages to Next.js, stripping any client-supplied
+  `X-Forwarded-*` headers and setting its own.
+- It trusts `X-Forwarded-For` only on requests coming from the frontend's own
+  address (resolved from `DOGFOOD_FRONTEND_URL`), i.e. the server-side calls
+  that forward the real client, as stamped by Go. Next.js alone would pass a
+  client's forged header through (it sets the header only when absent), which
+  is why Next is not the edge.
+
+### Colluding judges and targeted favouritism (partly)
+- A judge who inflates one friend does not look lenient overall, but that
+  review is an **outlier** against the model's prediction (|z| ≥ 2.5). The
+  results page lists it with its price in ranks ("worth 10 places").
+- Each judge's **agreement** with the consensus computed without them is
+  shown; negative agreement is flagged *contrarian*.
+- **Leave-one-judge-out** shows whether any single judge decides first place.
+- *Test:* `TestOutlierFindsPlantedRogueReview`.
+
+### Results rewritten after publication
+- Publication yields a signed manifest committing to the input fingerprint,
+  the ranking and the audit hash of the publication. Anyone who saved the
+  bundle can prove later that inputs or ranking changed.
+  *Test:* `TestVerifiableResultsBundle`.
+
 ### Credential attacks
 - Passwords: PBKDF2-SHA256, 600,000 iterations, per-user salt, constant-time
   compare; unknown emails take the same time as wrong passwords.
@@ -119,9 +144,9 @@ Honest list. Each is a known gap, not an oversight.
 | Attack | Why it still works | Mitigation available |
 |---|---|---|
 | **Sybil voting from many networks with aged accounts** | Without email or phone verification (no external services by design), a patient attacker who creates accounts days before voting, from different IPs, looks like real voters. | Set `votes_per_voter` low, weight community vote lightly, review held votes. Email-domain allowlists would be the next feature. |
-| **Colluding judges** | Two judges who agree to inflate a friend's project both score it high. Normalization corrects *consistent* leniency, not targeted favouritism. | Organizer sees per-judge leniency and every review; the audit log shows timing. Assignment spreads co-reviews across many pairs, so collusion needs many conspirators. A "judge agreement outlier" report is a natural addition. |
+| **Colluding judges who agree with each other** | If *every* reviewer of a project inflates it together, there is no honest review to disagree with, so no outlier appears. Outlier detection catches a lone favourite, not a unanimous conspiracy. | Assignment spreads co-reviews across many judge pairs, so a unanimous conspiracy needs every reviewer of that project. A tie-breaker round adds an independent reviewer where it matters. |
 | **A malicious organizer** | Organizers can move deadlines, re-weight rubrics and disqualify. | Every such action is in the tamper-evident log with old and new values; publishing the audit export makes it visible. The platform does not pretend organizers are untrusted. |
-| **Operator with database access** | Can rewrite rows and recompute the whole hash chain from scratch. | Periodically publish the latest audit hash (e.g. in the results announcement); a later rewrite would not match it. We do not anchor hashes anywhere external, by design (offline). |
+| **Operator with database access** | Can rewrite rows and recompute the whole hash chain from scratch, before publication. | The signed results bundle anchors the published ranking to the audit hash at publication; anyone who saved it can detect a later rewrite. Before publication the operator is trusted. We do not anchor hashes externally, by design (offline). |
 | **Shared-IP false positives** | A classroom behind one NAT trips the network rule. | Votes are held, never dropped; an organizer counts them in one click. |
 | **Rate-limit state is in memory** | Restarting the process resets buckets. | Acceptable for one process; a multi-instance deployment would need a shared store. |
 | **IP hashes are pseudonymous, not anonymous** | Keyed HMAC with a per-instance secret: not reversible without the database, but the operator could correlate. | Documented; no raw IPs are ever stored. |

@@ -2,6 +2,9 @@
 data
 docs
 tests
+tools
 *.db
 *.db-*
 acceptance-report.txt
+extended-report.txt
+src/frontend

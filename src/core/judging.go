@@ -24,6 +24,7 @@ type JudgeSummary struct {
 	Tracks   []string `json:"tracks"`
 	Assigned int      `json:"assigned"`
 	Done     int      `json:"done"`
+	CanLogin bool     `json:"can_login"` // false: imported, needs an activation link
 }
 
 func (s *Service) Judges(ctx context.Context, a Actor, eventID string) ([]JudgeSummary, error) {
@@ -33,7 +34,8 @@ func (s *Service) Judges(ctx context.Context, a Actor, eventID string) ([]JudgeS
 	rows, err := s.DB.QueryContext(ctx, `SELECT u.id, u.email, u.name,
 		(SELECT count(*) FROM assignments x WHERE x.event_id = r.event_id AND x.judge_id = u.id AND x.status <> 'recused'),
 		(SELECT count(*) FROM assignments x WHERE x.event_id = r.event_id AND x.judge_id = u.id AND x.status = 'done'),
-		coalesce((SELECT group_concat(track_id) FROM judge_tracks t WHERE t.event_id = r.event_id AND t.user_id = u.id), '')
+		coalesce((SELECT group_concat(track_id) FROM judge_tracks t WHERE t.event_id = r.event_id AND t.user_id = u.id), ''),
+		u.password_hash IS NOT NULL
 		FROM event_roles r JOIN users u ON u.id = r.user_id WHERE r.event_id = ? AND r.role = 'judge' ORDER BY u.name`, eventID)
 	if err != nil {
 		return nil, err
@@ -43,7 +45,7 @@ func (s *Service) Judges(ctx context.Context, a Actor, eventID string) ([]JudgeS
 	for rows.Next() {
 		var j JudgeSummary
 		var tracks string
-		if err := rows.Scan(&j.User.ID, &j.User.Email, &j.User.Name, &j.Assigned, &j.Done, &tracks); err != nil {
+		if err := rows.Scan(&j.User.ID, &j.User.Email, &j.User.Name, &j.Assigned, &j.Done, &tracks, &j.CanLogin); err != nil {
 			return nil, err
 		}
 		if tracks != "" {

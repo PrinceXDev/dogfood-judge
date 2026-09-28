@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Dogfood Judge</title>
+  <style>.b{fill:#00a883}@media (prefers-color-scheme:dark){.b{fill:#3cf2c0}}</style>
+  <mask id="m">
+    <rect width="32" height="32" fill="#fff"/>
+    <circle cx="25.6" cy="3.1" r="3.3"/>
+    <circle cx="29.2" cy="6.4" r="3.3"/>
+    <circle cx="29.9" cy="11.3" r="3.1"/>
+    <circle cx="11" cy="7.4" r="1.7"/>
+  </mask>
+  <rect class="b" x="4" y="2" width="24" height="28" rx="7.5" mask="url(#m)"/>
+  <path d="M10 18.6 L14.3 22.6 L22 13.6" fill="none" stroke="#03120d" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#03120d"><circle cx="10" cy="18.6" r="2"/><circle cx="14.3" cy="22.6" r="2"/><circle cx="22" cy="13.6" r="2"/></g>
+</svg>

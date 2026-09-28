@@ -169,6 +169,51 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 		}
 		return created{map[string]any{"invitation": inv, "url": s.absURL(r, "/invite/"+inv.Token)}}, nil
 	}))
+	mux.HandleFunc("GET /api/v1/invitations/{token}", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		inv, e, err := s.svc.InvitationInfo(r.Context(), r.PathValue("token"))
+		if err != nil {
+			return nil, err
+		}
+		inv.Token = ""
+		return map[string]any{"invitation": inv, "event": e}, nil
+	}))
+	mux.HandleFunc("GET /api/v1/teams/invite/{token}", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		t, e, err := s.svc.TeamByInvite(r.Context(), r.PathValue("token"))
+		if err != nil {
+			return nil, err
+		}
+		// Public preview of an invite link: names only, never member emails.
+		names := []string{}
+		for _, m := range t.Members {
+			names = append(names, m.Name)
+		}
+		return map[string]any{"team": map[string]any{"id": t.ID, "name": t.Name, "members": names}, "event": e}, nil
+	}))
+	mux.HandleFunc("GET /api/v1/activate/{token}", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		u, err := s.svc.ActivationInfo(r.Context(), r.PathValue("token"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"email": u.Email, "name": u.Name}, nil
+	}))
+	mux.HandleFunc("GET /api/v1/events/{event}/all-projects", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id, err := s.eventParam(r)
+		if err != nil {
+			return nil, err
+		}
+		ps, err := s.svc.EventProjects(r.Context(), actorOf(r), id)
+		if ps == nil && err == nil {
+			ps = []*core.Project{}
+		}
+		return ps, err
+	}))
+	mux.HandleFunc("GET /api/v1/events/{event}/comments", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id, err := s.eventParam(r)
+		if err != nil {
+			return nil, err
+		}
+		return s.svc.EventComments(r.Context(), actorOf(r), id)
+	}))
 	mux.HandleFunc("POST /api/v1/invitations/{token}/accept", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.svc.AcceptInvitation(r.Context(), actorOf(r), r.PathValue("token"))
 	}))
@@ -361,6 +406,22 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 		}
 		return s.svc.RunAssignment(r.Context(), actorOf(r), id)
 	}))
+	mux.HandleFunc("POST /api/v1/events/{event}/assignments/tiebreak", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		in := struct {
+			Max int `json:"max"`
+		}{}
+		if err := decode(r, &in, 1<<16); err != nil {
+			return nil, err
+		}
+		return s.svc.RunTiebreak(r.Context(), actorOf(r), r.PathValue("event"), in.Max)
+	}))
+	mux.HandleFunc("GET /api/v1/events/{event}/results/bundle", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		b, err := s.svc.Bundle(r.Context(), actorOf(r), r.PathValue("event"))
+		if err == nil {
+			w.Header().Set("Content-Disposition", `attachment; filename="`+b.Inputs.EventID+`-results-bundle.json"`)
+		}
+		return b, err
+	}))
 	mux.HandleFunc("GET /api/v1/events/{event}/pairwise/next", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.svc.NextPair(r.Context(), actorOf(r), r.PathValue("event"))
 	}))
@@ -433,7 +494,14 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 			return nil, err
 		}
 		entries, v, err := s.svc.AuditLog(r.Context(), actorOf(r), id, 500)
-		return map[string]any{"verification": v, "entries": entries}, err
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(entries))
+		for _, e := range entries {
+			ids = append(ids, e.ActorID)
+		}
+		return map[string]any{"verification": v, "entries": entries, "names": s.svc.UserNames(r.Context(), ids)}, nil
 	}))
 
 	// voting and comments
@@ -564,6 +632,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 		return map[string]string{"alg": "Ed25519", "key_id": k.KeyID, "public_key": base64.StdEncoding.EncodeToString(k.Pub)}, nil
 	}))
 
+	s.demoRoutes(mux)
+
 	mux.HandleFunc("GET /api/v1/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := assets.ReadFile("static/openapi.yaml")
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
@@ -652,7 +722,8 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) (any, error) {
 			}
 		}
 	}
-	return map[string]any{"user": a.User, "roles": roles}, nil
+	return map[string]any{"user": a.User, "roles": roles, "can_create_events": s.svc.CanCreateEvents(a),
+		"csrf_token": s.csrfToken(r)}, nil
 }
 
 func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) (any, error) {

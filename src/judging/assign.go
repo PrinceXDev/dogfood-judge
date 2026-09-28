@@ -13,7 +13,11 @@ type AssignInput struct {
 	Existing   []Pair // assignments that already exist (any status except recused)
 	Recused    []Pair // pairs that must never be re-created
 	PerProject int    // target reviews per project
-	Seed       uint64
+	// Targets overrides PerProject for individual projects (tie-breaker rounds).
+	Targets map[string]int
+	// Reasons prefixes a project's new assignment reasons, e.g. "tie-breaker: P(top 3) 48%".
+	Reasons map[string]string
+	Seed    uint64
 }
 
 type JudgeInfo struct {
@@ -138,7 +142,11 @@ func Assign(in AssignInput) *AssignReport {
 	})
 
 	for _, p := range projects {
-		for len(byProject[p.ID]) < in.PerProject {
+		want := in.PerProject
+		if t, ok := in.Targets[p.ID]; ok {
+			want = t
+		}
+		for len(byProject[p.ID]) < want {
 			cands := eligible(p, true)
 			reason := "track match"
 			if len(cands) == 0 {
@@ -165,6 +173,9 @@ func Assign(in AssignInput) *AssignReport {
 				}
 			}
 			why := reason
+			if pre := in.Reasons[p.ID]; pre != "" {
+				why = pre + "; " + reason
+			}
 			if bestKey[1] == 0 && len(byProject[p.ID]) > 0 {
 				why += "; bridges two judge groups"
 			}

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-redesign",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "src/frontend", "--", "-p", "3100"],
+      "env": { "API_URL": "http://127.0.0.1:8090" },
+      "port": 3100
+    }
+  ]
+}
