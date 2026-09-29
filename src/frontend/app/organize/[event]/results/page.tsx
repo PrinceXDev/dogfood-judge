@@ -17,6 +17,8 @@ import {
 } from "@/components/ui";
 import { BoundaryStrip } from "@/components/viz/boundary-strip";
 import { Calibration } from "@/components/viz/calibration";
+import { ConvergenceChart } from "@/components/viz/convergence";
+import { CriterionHeatmap } from "@/components/viz/criterion-heatmap";
 import { DefensibilityGraph } from "@/components/viz/defensibility-graph";
 import { NormalizationView } from "@/components/viz/normalization";
 import { RankDensity } from "@/components/viz/rank-density";
@@ -391,6 +393,17 @@ export default async function OrganizerResults({
             </Section>
           )}
 
+          {rep.convergence && (
+            <Section
+              id="convergence"
+              eyebrow="Convergence"
+              title="Do we have enough reviews?"
+              desc={`Every project keeps a random share of its reviews and the engine refits, ${rep.convergence.subsamples} times per step. If the top ${rep.convergence.top_n} barely moves with a fifth of the reviews gone, another fifth won't move it either. In 48 simulated events with a planted truth, every "settled" top 3 was the true one; "still moving" ones were right 43% of the time.`}
+            >
+              <ConvergenceChart c={rep.convergence} total={rep.reviews} />
+            </Section>
+          )}
+
           <Section
             id="reviews"
             eyebrow="Outliers"
@@ -631,6 +644,25 @@ export default async function OrganizerResults({
                 topK={rb.top_k ?? []}
                 refitTopK={rb.refit_top_k ?? {}}
                 titles={titles}
+              />
+            </Section>
+          )}
+
+          {!!res.criterion_leniency?.cells?.length && (
+            <Section
+              id="criteria"
+              eyebrow="Leniency by criterion"
+              title="Where exactly does each judge differ?"
+              desc="Each value is compared with the other judges who scored the same project on the same criterion, so project quality cancels out. Offsets are shrunk toward zero by empirical Bayes, and only those whose 90% interval clears zero are coloured. Hover a cell for the raw offset, sample size and shrinkage."
+            >
+              <CriterionHeatmap
+                data={res.criterion_leniency}
+                judgeLabel={Object.fromEntries(
+                  judges.map((j) => [j.judge, j.name || j.judge]),
+                )}
+                criterionLabel={Object.fromEntries(
+                  criteria.map((c) => [c.key, c.name || c.key]),
+                )}
               />
             </Section>
           )}

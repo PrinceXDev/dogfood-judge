@@ -831,6 +831,64 @@ components:
               type: object
               properties:
                 refit_top_k: { type: object, additionalProperties: { type: array, items: { type: string } }, description: "Organizers only: the top k of each leave-one-judge-out refit, keyed by the removed judge." }
+            convergence:
+              type: object
+              description: "Review-count learning curve: each project keeps a random fraction of its reviews and the model is refitted. See JUDGING.md."
+              properties:
+                top_n: { type: integer }
+                top_k: { type: integer }
+                subsamples: { type: integer }
+                settled: { type: boolean, description: "With 20% of reviews removed, top-N tau >= 0.9 and the top-k set is unchanged in >= 80% of refits." }
+                verdict: { type: string }
+                curve:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fraction: { type: number }
+                      reviews: { type: number }
+                      per_project: { type: number }
+                      tau_mean: { type: number }
+                      tau_low: { type: number }
+                      tau_high: { type: number }
+                      top_k_same: { type: number }
+                      winner_same: { type: number }
+                arrival:
+                  type: array
+                  description: "The real trajectory in write order; absent when write times can't order the reviews (e.g. imported scores)."
+                  items:
+                    type: object
+                    properties:
+                      reviews: { type: integer }
+                      tau: { type: number }
+                      top_k_same: { type: boolean }
+        criterion_leniency:
+          type: object
+          description: "Organizers only: each judge's offset per criterion vs co-judges on the same projects, shrunk by empirical Bayes, with a 90% interval."
+          properties:
+            criteria:
+              type: array
+              items:
+                type: object
+                properties:
+                  criterion: { type: string }
+                  tau: { type: number }
+                  sigma: { type: number }
+                  flagged: { type: integer }
+            cells:
+              type: array
+              items:
+                type: object
+                properties:
+                  judge: { type: string }
+                  criterion: { type: string }
+                  reviews: { type: integer }
+                  raw: { type: number }
+                  lambda: { type: number }
+                  shrunk: { type: number }
+                  low: { type: number }
+                  high: { type: number }
+                  signal: { type: string, enum: [lenient, harsh, noise, low data] }
         rows:
           type: array
           items:

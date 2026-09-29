@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/button";
+import { PrintButton } from "@/components/forms";
 import { Icon, type IconName } from "@/components/icons";
 import { publicOrigin } from "@/components/trust/origin";
 import {
@@ -80,13 +81,16 @@ export default async function Playbook({
         title="Run this event"
         sub="Every step below is worked out from the event's live state, so it can't say done before it is. Each one links to where the work happens."
         actions={
-          <a
-            href={`data:text/markdown;charset=utf-8,${encodeURIComponent(md)}`}
-            download={`${e.slug}-playbook.md`}
-            className={buttonClass("secondary")}
-          >
-            <Icon name="download" size={14} /> Download as Markdown
-          </a>
+          <div className="no-print flex flex-wrap gap-2">
+            <a
+              href={`data:text/markdown;charset=utf-8,${encodeURIComponent(md)}`}
+              download={`${e.slug}-playbook.md`}
+              className={buttonClass("secondary")}
+            >
+              <Icon name="download" size={14} /> Download as Markdown
+            </a>
+            <PrintButton label="Save as PDF" />
+          </div>
         }
       />
 

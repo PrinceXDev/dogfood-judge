@@ -661,6 +661,8 @@ type Results struct {
 	Votes     []VoteTally     `json:"votes,omitempty"`
 	Excluded  []*Project      `json:"excluded"` // duplicates and disqualified, with reasons
 	Published bool            `json:"published"`
+	// CriterionLeniency breaks judge leniency down by criterion; organizers only.
+	CriterionLeniency *judging.CriterionReport `json:"criterion_leniency,omitempty"`
 }
 
 type PairwiseRow struct {
@@ -727,6 +729,13 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 	}
 	writeOrder(input, all)
 	res.Report = s.analyze(e, input, bootstrap)
+	if c := res.Report.Convergence; c != nil {
+		if ordered, ok := arrivalOrder(input, all); ok {
+			cp := *c // the report is a shallow copy of the cache: copy before editing
+			cp.Arrival = judging.ArrivalCurve(ordered, &cp, judging.Options{Seed: seedFrom(e.ID)})
+			res.Report.Convergence = &cp
+		}
+	}
 	ranked := map[string]bool{}
 	for _, pr := range res.Report.Projects {
 		ranked[pr.Project] = true
@@ -749,6 +758,7 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 		for _, j := range res.Report.Judges {
 			res.Judges = append(res.Judges, JudgeRow{Name: names[j.Judge], JudgeResult: j})
 		}
+		res.CriterionLeniency = criterionLeniency(e, all, projects)
 	} else {
 		res.Report.Judges = nil // judge diagnostics are for organizers only
 		if rb := res.Report.Robustness; rb != nil {
@@ -1080,6 +1090,58 @@ func writeOrder(input []judging.Review, all []*Review) {
 			input[i].Seq = n + 1
 		}
 	}
+}
+
+// arrivalOrder sorts the reviews by when they were first written. Imported
+// scores share one timestamp, so their order is unknowable: when more than a
+// tenth of reviews share a second with another, ok is false and no arrival
+// curve is drawn rather than one built on an arbitrary order.
+func arrivalOrder(input []judging.Review, all []*Review) ([]judging.Review, bool) {
+	created := map[[2]string]time.Time{}
+	for _, r := range all {
+		created[[2]string{r.JudgeID, r.ProjectID}] = r.CreatedAt
+	}
+	ordered := append([]judging.Review(nil), input...)
+	sort.SliceStable(ordered, func(a, b int) bool {
+		x, y := created[[2]string{ordered[a].Judge, ordered[a].Project}], created[[2]string{ordered[b].Judge, ordered[b].Project}]
+		if !x.Equal(y) {
+			return x.Before(y)
+		}
+		if ordered[a].Project != ordered[b].Project {
+			return ordered[a].Project < ordered[b].Project
+		}
+		return ordered[a].Judge < ordered[b].Judge
+	})
+	perSecond := map[int64]int{}
+	for _, r := range ordered {
+		perSecond[created[[2]string{r.Judge, r.Project}].Unix()]++
+	}
+	tied := 0
+	for _, n := range perSecond {
+		if n > 1 {
+			tied += n
+		}
+	}
+	return ordered, len(ordered) >= 4 && tied*10 <= len(ordered)
+}
+
+// criterionLeniency feeds every criterion value of the ranked projects'
+// reviews to the per-criterion leniency estimate, in rubric order.
+func criterionLeniency(e *Event, all []*Review, projects map[string]*Project) *judging.CriterionReport {
+	var keys []string
+	for _, c := range e.Criteria {
+		keys = append(keys, c.Key)
+	}
+	var scores []judging.CriterionScore
+	for _, r := range all {
+		if projects[r.ProjectID] == nil {
+			continue
+		}
+		for k, v := range r.Scores {
+			scores = append(scores, judging.CriterionScore{Judge: r.JudgeID, Project: r.ProjectID, Criterion: k, Value: float64(v)})
+		}
+	}
+	return judging.CriterionLeniency(scores, keys)
 }
 
 // analyze memoises judging.Analyze by a hash of its exact inputs, so the

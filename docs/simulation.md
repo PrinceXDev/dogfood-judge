@@ -75,3 +75,14 @@ Variance-based selection does not match the live rule at every budget, so the li
 | 10 | 2000 | 3.8% | 99% | 14% |
 | 16 | 2000 | 4.8% | 100% | 46% |
 | 24 | 2000 | 4.7% | 100% | 67% |
+
+## Review-count learning curve: is "settled" calibrated?
+
+48 synthetic events: 20 projects, 12 judges (leniency SD 0.4, quality SD 0.8), 2, 4 or 8 reviews per project, noise 0.3 or 1.0, 8 events per cell. "Settled" means that with 20% of reviews removed, top-10 tau >= 0.9 and the same top 3 in >= 80% of 40 refits. *Right* means the full-data top 3 equals the planted top 3.
+
+| Verdict | Events | Top 3 right |
+|---|---:|---:|
+| Settled | 6 | 100% |
+| Still moving | 42 | 43% |
+
+The verdict is conservative: it seldom says settled, and when it does it is right. Reproduce with `go test ./src/judging -run ConvergenceVerdictIsCalibrated -v`.

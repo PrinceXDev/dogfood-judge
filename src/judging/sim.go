@@ -308,3 +308,74 @@ func SimulateDrift(perJudge, trials int, seed uint64) DriftSimResult {
 	res.ErraticCaught = erratic / float64(trials)
 	return res
 }
+
+// PairModelSimResult compares the three pairwise estimators on the same
+// comparisons, drawn from a Davidson model with a known tie propensity.
+type PairModelSimResult struct {
+	Budget      int     `json:"budget"`
+	TrueNu      float64 `json:"true_nu"`
+	TieShare    float64 `json:"tie_share"`    // observed share of ties
+	BTTau       float64 `json:"bt_tau"`       // ties as half a win (the live ranking)
+	DavidsonTau float64 `json:"davidson_tau"` // ties modelled
+	EloTau      float64 `json:"elo_tau"`      // Elo averaged over orderings
+	NuMean      float64 `json:"nu_mean"`      // Davidson's estimate of nu
+	NuCover     float64 `json:"nu_cover"`     // share of trials whose nu ± 1.645 SE covers the truth
+}
+
+// SimulatePairModels draws Davidson ground truth for n projects, answers
+// budget random pairs, and scores each estimator against the true order.
+func SimulatePairModels(nProjects int, nu float64, budgets []int, trials int, seed uint64) []PairModelSimResult {
+	rng := rand.New(rand.NewPCG(seed, 0xda3e39cb94b95bdb))
+	ids := make([]string, nProjects)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("p%02d", i)
+	}
+	var out []PairModelSimResult
+	for _, budget := range budgets {
+		res := PairModelSimResult{Budget: budget, TrueNu: nu}
+		ties := 0
+		for t := 0; t < trials; t++ {
+			truth := map[string]float64{}
+			for _, id := range ids {
+				truth[id] = 1.2 * rng.NormFloat64()
+			}
+			cs := make([]Comparison, 0, budget)
+			for k := 0; k < budget; k++ {
+				a := ids[rng.IntN(nProjects)]
+				b := ids[rng.IntN(nProjects)]
+				for b == a {
+					b = ids[rng.IntN(nProjects)]
+				}
+				pa, pb := math.Exp(truth[a]), math.Exp(truth[b])
+				tie := nu * math.Sqrt(pa*pb)
+				u := rng.Float64() * (pa + pb + tie)
+				o := 0.0
+				switch {
+				case u < pa:
+					o = 1
+				case u < pa+tie:
+					o = 0.5
+					ties++
+				}
+				cs = append(cs, Comparison{A: a, B: b, Outcome: o})
+			}
+			res.BTTau += KendallTau(FitBT(cs, ids).Strength, truth)
+			d := FitDavidson(cs, ids)
+			res.DavidsonTau += KendallTau(d.Strength, truth)
+			res.NuMean += d.Nu
+			if math.Abs(d.Nu-nu) <= 1.645*d.NuSE {
+				res.NuCover++
+			}
+			res.EloTau += KendallTau(FitElo(cs, ids, 50, seed+uint64(t)).Rating, truth)
+		}
+		n := float64(trials)
+		res.TieShare = float64(ties) / (n * float64(budget))
+		res.BTTau /= n
+		res.DavidsonTau /= n
+		res.EloTau /= n
+		res.NuMean /= n
+		res.NuCover /= n
+		out = append(out, res)
+	}
+	return out
+}

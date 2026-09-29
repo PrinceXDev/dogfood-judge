@@ -315,6 +315,14 @@ func TestFullLifecycle(t *testing.T) {
 	if len(res.Rows) != 2 || len(res.Judges) != 0 {
 		t.Fatalf("public results: %d rows, %d judge rows (judge diagnostics must stay private)", len(res.Rows), len(res.Judges))
 	}
+	if res.CriterionLeniency != nil {
+		t.Fatal("public results expose per-criterion judge leniency")
+	}
+	var orgRes core.Results
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/results", adminTok, nil), 200).JSON(t, &orgRes)
+	if orgRes.CriterionLeniency == nil || len(orgRes.CriterionLeniency.Criteria) == 0 {
+		t.Fatal("organizer results are missing per-criterion leniency")
+	}
 	// Judging closes on publication.
 	p.must(p.api("PUT", "/api/v1/events/"+slug+"/reviews/"+proj.ID, j1, map[string]any{"scores": scores}), 403)
 

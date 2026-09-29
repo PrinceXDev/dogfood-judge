@@ -110,7 +110,11 @@ ballot stuffing by one account; the rest is about many accounts:
   each of their reviews is in the published results unchanged. This proves
   inclusion and integrity after publication, not honest scoring, and not that
   the portal stored what the judge typed before publication.
-  *Tests:* `TestVerifiableResultsBundle`, `TestMerkleInclusionProofs`.
+  The same check runs in the browser on `/verify`, with the hashing and the
+  Ed25519 check done locally by Web Crypto.
+  *Tests:* `TestVerifiableResultsBundle`, `TestMerkleInclusionProofs`,
+  `TestMerkleSharedVector` and `lib/merkle.test.ts` (one vector, both
+  languages).
 
 ### Credential attacks
 - Passwords: PBKDF2-SHA256, 600,000 iterations, per-user salt, constant-time
