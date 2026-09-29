@@ -72,13 +72,14 @@ export function EventForm({
           label="Slug"
           hint="Used in URLs. Leave empty to derive it from the name."
         >
-          <div className="flex items-stretch overflow-hidden rounded-md border border-line-strong bg-surface-2 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent/15">
+          <div className="flex items-stretch overflow-hidden rounded-md border border-line-strong bg-surface-2 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent/15 has-[[aria-invalid=true]]:border-bad/70">
             <span className="flex items-center border-r border-line-strong bg-sunken px-3 font-mono text-xs text-muted">
               /events/
             </span>
             <input
               name="slug"
               pattern="[a-z0-9][a-z0-9-]{1,62}"
+              title="Use 2 to 63 lowercase letters, numbers and dashes, starting with a letter or number."
               defaultValue={event?.slug}
               className="min-w-0 flex-1 bg-transparent px-3 py-2 font-mono text-sm text-ink outline-none placeholder:text-muted/80"
             />

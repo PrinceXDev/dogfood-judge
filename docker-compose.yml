@@ -21,6 +21,9 @@ services:
       # DOGFOOD_PUBLIC_URL: "https://judge.example.org"
       # DOGFOOD_SECURE_COOKIES: "1"
       # DOGFOOD_TRUST_PROXY: "1"
+      # Optional sign-in providers (off unless both are set; see .env.example):
+      # DOGFOOD_OAUTH_GOOGLE_CLIENT_ID: "..."
+      # DOGFOOD_OAUTH_GOOGLE_CLIENT_SECRET: "..."
     restart: unless-stopped
 
   web:
@@ -29,8 +32,10 @@ services:
     environment:
       API_URL: "http://api:8080"
       # DOGFOOD_SECURE_COOKIES: "1"
+    # Wait for the image's /healthz check (database reachable) before serving pages.
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

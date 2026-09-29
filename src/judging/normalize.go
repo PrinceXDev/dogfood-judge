@@ -18,6 +18,9 @@ type Review struct {
 	Judge   string
 	Project string
 	Score   float64
+	// Seq is the order in which the judge wrote this review (1 = first), used
+	// only by the drift check; 0 means unknown and skips that check.
+	Seq int
 }
 
 // Method names, in the order they are reported.
@@ -373,6 +376,9 @@ type ProjectResult struct {
 	// AheadOfNext is the bootstrap probability that this project really
 	// outranks the one listed directly below it; near 0.5 is a statistical tie.
 	AheadOfNext float64 `json:"ahead_of_next"`
+	// RankDist[r-1] counts bootstrap replicates in which the project placed
+	// r-th; it sums to the bootstrap count. P(top n) for any n falls out of it.
+	RankDist []int `json:"rank_dist"`
 }
 
 type JudgeResult struct {
@@ -392,6 +398,9 @@ type JudgeResult struct {
 	Outliers   int     `json:"outliers"`  // reviews by this judge flagged as outliers
 	FlipsTopK  int     `json:"flips_top_k"`
 	FlipsFirst bool    `json:"flips_first"`
+	// Drift compares the judge's first and second half of reviews in the
+	// order they wrote them; nil below DriftMinReviews or without an order.
+	Drift *JudgeDrift `json:"drift,omitempty"`
 }
 
 type Report struct {
@@ -472,6 +481,7 @@ func Analyze(reviews []Review, wantReviews int, opt Options) *Report {
 	rep.Fit = FitSummary{Mu: full.Mu, Sigma: full.Sigma, TauBias: full.TauBias, TauQuality: full.TauQuality,
 		TauScale: opt.ScalePriorSD, Iterations: full.Iterations, Converged: full.Converged}
 	rep.Judges = judgeDiagnostics(reviews, full)
+	drift(rep.Judges, reviews, full, opt.Seed)
 	rep.Components = Components(reviews)
 	bootstrap(rep, reviews, full, opt)
 	robustness(rep, reviews, full, opt)
@@ -527,6 +537,7 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 	rng := rand.New(rand.NewPCG(opt.Seed, 0x9e3779b97f4a7c15))
 	rankSamples := map[string][]int{}
 	top := map[string]int{}
+	rankDist := map[string][]int{}
 	ahead := make([]int, len(rep.Projects))
 	quick := opt
 	quick.Bootstrap = -1
@@ -546,6 +557,10 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 		}
 		for p, r := range rankOf(adj) {
 			rankSamples[p] = append(rankSamples[p], r)
+			if rankDist[p] == nil {
+				rankDist[p] = make([]int, len(projects))
+			}
+			rankDist[p][r-1]++
 			if r <= opt.TopK {
 				top[p]++
 			}
@@ -562,6 +577,7 @@ func bootstrap(rep *Report, reviews []Review, full *Fit, opt Options) {
 		p.RankLow = rs[int(0.05*float64(len(rs)))]
 		p.RankHigh = rs[int(math.Min(0.95*float64(len(rs)), float64(len(rs)-1)))]
 		p.ProbTopK = float64(top[p.Project]) / float64(opt.Bootstrap)
+		p.RankDist = rankDist[p.Project]
 	}
 	for i := 0; i+1 < len(rep.Projects); i++ {
 		rep.Projects[i].AheadOfNext = float64(ahead[i]) / float64(opt.Bootstrap)

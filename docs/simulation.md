@@ -54,11 +54,24 @@ Every trial draws true project quality, judge leniency, judge scale use and nois
 
 ## Pairwise mode: adaptive vs random pair selection
 
-40 projects, 30 judges, Bradley-Terry ground truth (strength SD 1.2).
+40 projects, 30 judges, Bradley-Terry ground truth (strength SD 1.2). *Adaptive* is the live rule (outcome uncertainty p(1-p), damped by comparison counts; a judge's previous projects are kept out of their next pair). *Variance* picks the pair with the largest expected drop in SE_a² + SE_b². It ships only if it matches or beats adaptive at every budget.
 
-| Comparisons | Adaptive tau | Random tau | Adaptive top-5 | Random top-5 |
+| Comparisons | Adaptive tau | Variance tau | Random tau | Adaptive top-5 | Variance top-5 | Random top-5 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 80 | 0.481 | 0.446 | 0.466 | 47.0% | 45.8% | 43.8% |
+| 160 | 0.623 | 0.584 | 0.583 | 60.4% | 60.2% | 56.6% |
+| 320 | 0.731 | 0.708 | 0.702 | 67.6% | 70.2% | 67.0% |
+| 640 | 0.804 | 0.806 | 0.779 | 75.6% | 80.2% | 73.6% |
+
+Variance-based selection does not match the live rule at every budget, so the live rule stays the default.
+
+## Judge fatigue: drift check
+
+40 projects, 12 judges writing their reviews in random order. In every world one judge gives a constant score for their second half (flattening) and one triples their noise for it (erratic); the rest never change. Each check is a permutation test at 2.5% per tail.
+
+| Reviews per judge | Honest judges | False flags | Flattening caught | Erratic caught |
 |---:|---:|---:|---:|---:|
-| 80 | 0.498 | 0.461 | 46.6% | 45.8% |
-| 160 | 0.624 | 0.571 | 59.0% | 54.0% |
-| 320 | 0.735 | 0.702 | 68.8% | 67.8% |
-| 640 | 0.805 | 0.784 | 77.6% | 73.6% |
+| 8 | 2000 | 3.6% | 98% | 8% |
+| 10 | 2000 | 3.8% | 99% | 14% |
+| 16 | 2000 | 4.8% | 100% | 46% |
+| 24 | 2000 | 4.7% | 100% | 67% |

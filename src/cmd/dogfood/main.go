@@ -69,14 +69,18 @@ func main() {
 		err = verifyRecord(args)
 	case "verify-results":
 		err = verifyResults(args)
+	case "verify-review":
+		err = verifyReview(args)
 	case "export":
 		err = export(args)
 	case "import":
 		err = importDoc(args)
 	case "set-password":
 		err = setPassword(args)
+	case "backup":
+		err = backup(args)
 	case "help", "-h", "--help":
-		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|verify-results|export|import|set-password]")
+		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|verify-results|verify-review|export|import|set-password|backup]")
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
@@ -117,11 +121,23 @@ func serve() error {
 	if err := seed.Run(ctx, svc, seed.Options{FixturesPath: fixtures, Demo: envBool("DOGFOOD_DEMO", true)}); err != nil {
 		return fmt.Errorf("seed: %w", err)
 	}
+	oauth := core.OAuthProviders(os.Getenv)
+	if len(oauth) > 0 {
+		base := os.Getenv("DOGFOOD_PUBLIC_URL")
+		if base == "" {
+			log.Warn("sign-in providers are enabled but DOGFOOD_PUBLIC_URL is not set; redirect URIs will follow the request host")
+			base = "http://localhost:8080"
+		}
+		for i, u := range web.OAuthCallbackPaths(base, oauth) {
+			log.Info("sign-in provider enabled", "provider", oauth[i].Name, "redirect_uri", u)
+		}
+	}
 	srv, err := web.New(svc, web.Config{
 		SecureCookies: envBool("DOGFOOD_SECURE_COOKIES", false),
 		TrustProxy:    envBool("DOGFOOD_TRUST_PROXY", false),
 		PublicURL:     os.Getenv("DOGFOOD_PUBLIC_URL"),
 		FrontendURL:   os.Getenv("DOGFOOD_FRONTEND_URL"),
+		OAuth:         oauth,
 	}, log)
 	if err != nil {
 		return err
@@ -299,9 +315,23 @@ func simulate(args []string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "## Pairwise mode: adaptive vs random pair selection\n\n40 projects, 30 judges, Bradley-Terry ground truth (strength SD 1.2).\n\n| Comparisons | Adaptive tau | Random tau | Adaptive top-5 | Random top-5 |\n|---:|---:|---:|---:|---:|\n")
+	fmt.Fprintf(w, "## Pairwise mode: adaptive vs random pair selection\n\n40 projects, 30 judges, Bradley-Terry ground truth (strength SD 1.2). *Adaptive* is the live rule (outcome uncertainty p(1-p), damped by comparison counts; a judge's previous projects are kept out of their next pair). *Variance* picks the pair with the largest expected drop in SE_a² + SE_b². It ships only if it matches or beats adaptive at every budget.\n\n| Comparisons | Adaptive tau | Variance tau | Random tau | Adaptive top-5 | Variance top-5 | Random top-5 |\n|---:|---:|---:|---:|---:|---:|---:|\n")
+	ships := true
 	for _, r := range judging.SimulatePairwise(40, 30, []int{80, 160, 320, 640}, max(*trials/10, 20), 11) {
-		fmt.Fprintf(w, "| %d | %.3f | %.3f | %.1f%% | %.1f%% |\n", r.Budget, r.AdaptiveTau, r.RandomTau, 100*r.AdaptiveTopK, 100*r.RandomTopK)
+		fmt.Fprintf(w, "| %d | %.3f | %.3f | %.3f | %.1f%% | %.1f%% | %.1f%% |\n", r.Budget, r.AdaptiveTau, r.InfoTau, r.RandomTau, 100*r.AdaptiveTopK, 100*r.InfoTopK, 100*r.RandomTopK)
+		if r.InfoTau < r.AdaptiveTau || r.InfoTopK < r.AdaptiveTopK {
+			ships = false
+		}
+	}
+	if ships {
+		fmt.Fprintf(w, "\nVariance-based selection matches or beats the live rule at every budget.\n")
+	} else {
+		fmt.Fprintf(w, "\nVariance-based selection does not match the live rule at every budget, so the live rule stays the default.\n")
+	}
+	fmt.Fprintf(w, "\n## Judge fatigue: drift check\n\n40 projects, 12 judges writing their reviews in random order. In every world one judge gives a constant score for their second half (flattening) and one triples their noise for it (erratic); the rest never change. Each check is a permutation test at %.1f%% per tail.\n\n| Reviews per judge | Honest judges | False flags | Flattening caught | Erratic caught |\n|---:|---:|---:|---:|---:|\n", 100*judging.DriftAlpha)
+	for _, n := range []int{8, 10, 16, 24} {
+		r := judging.SimulateDrift(n, max(*trials/5, 40), 23)
+		fmt.Fprintf(w, "| %d | %d | %.1f%% | %.0f%% | %.0f%% |\n", n, r.Judges, 100*r.FalseFlagRate, 100*r.FlattenCaught, 100*r.ErraticCaught)
 	}
 	return nil
 }
@@ -485,5 +515,98 @@ func verifyResults(args []string) error {
 		return errors.New("results NOT verified")
 	}
 	fmt.Println("\nVERIFIED: the published ranking follows from the published inputs.")
+	return nil
+}
+
+// verifyReview proves that every review in a judge's signed record is in a
+// published results bundle, unchanged, under the manifest's review root.
+func verifyReview(args []string) error {
+	fs := flag.NewFlagSet("verify-review", flag.ExitOnError)
+	bundlePath := fs.String("bundle", "", "results bundle JSON (GET /api/v1/events/{event}/results/bundle)")
+	recordPath := fs.String("record", "", "the judge's signed record JSON (GET /api/v1/events/{event}/records/judge)")
+	key := fs.String("key", "", "base64 Ed25519 public key (from /.well-known/dogfood-signing-key)")
+	fs.Parse(args)
+	if *bundlePath == "" || *recordPath == "" || *key == "" {
+		return errors.New("usage: dogfood verify-review --bundle bundle.json --record record.json --key BASE64")
+	}
+	pub, err := base64.StdEncoding.DecodeString(*key)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return errors.New("--key is not a base64 Ed25519 public key")
+	}
+	b, err := os.ReadFile(*bundlePath)
+	if err != nil {
+		return err
+	}
+	var bundle core.ResultsBundle
+	if err := json.Unmarshal(b, &bundle); err != nil {
+		return fmt.Errorf("not a results bundle: %w", err)
+	}
+	r, err := os.ReadFile(*recordPath)
+	if err != nil {
+		return err
+	}
+	var rec core.SignedRecord
+	json.Unmarshal(r, &rec)
+	if rec.Payload == "" {
+		var wrapped struct{ Record core.SignedRecord }
+		json.Unmarshal(r, &wrapped)
+		rec = wrapped.Record
+	}
+	payload, err := core.VerifyRecord(ed25519.PublicKey(pub), rec)
+	if err != nil {
+		return fmt.Errorf("record INVALID: %w", err)
+	}
+	v := core.VerifyBundle(ed25519.PublicKey(pub), bundle)
+	if !v.Signature || v.Manifest == nil {
+		return errors.New("bundle manifest signature is INVALID for this key")
+	}
+	m := v.Manifest
+	switch {
+	case m.Type != core.ManifestV2:
+		return fmt.Errorf("manifest is %s, which has no review root; per-review proofs need %s", m.Type, core.ManifestV2)
+	case v.ReviewRoot == nil || !*v.ReviewRoot:
+		return errors.New("the bundle's reviews do not hash to the signed review root")
+	case payload.EventID != m.EventID:
+		return fmt.Errorf("record is for event %s, bundle for %s", payload.EventID, m.EventID)
+	case len(payload.ReviewLeaves) == 0:
+		return errors.New("the record carries no review leaves (issued before per-review proofs, or no reviews)")
+	}
+	fmt.Printf("OK   record signed by key %s for %s (%s)\n", core.KeyID(pub), payload.Name, payload.Pseudonym)
+	fmt.Printf("OK   manifest signed; %d reviews committed under root %s\n", m.ReviewCount, m.ReviewRoot)
+	failed := 0
+	for _, c := range core.VerifyReviews(bundle, m, payload.ReviewLeaves) {
+		if c.OK {
+			fmt.Printf("OK   review of %s is leaf %d (%d-hash path)\n", c.Project, c.Index, len(c.Path))
+			continue
+		}
+		failed++
+		fmt.Printf("FAIL leaf %s…: %s\n", c.Leaf[:min(12, len(c.Leaf))], c.Problem)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d reviews NOT found unchanged in the published results", failed, len(payload.ReviewLeaves))
+	}
+	fmt.Printf("\nVERIFIED: all %d of your reviews are in the published results, unchanged.\n", len(payload.ReviewLeaves))
+	fmt.Println("This proves inclusion and integrity after publication, not that any judge scored honestly.")
+	return nil
+}
+
+// backup writes a consistent copy of the live database with VACUUM INTO,
+// which SQLite runs inside a read transaction: the server keeps serving.
+func backup(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: dogfood backup PATH (PATH must not exist yet)")
+	}
+	if _, err := os.Stat(args[0]); err == nil {
+		return fmt.Errorf("%s already exists; choose a new file name", args[0])
+	}
+	db, err := store.Open(env("DOGFOOD_DB", "data/dogfood.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `VACUUM INTO ?`, args[0]); err != nil {
+		return fmt.Errorf("backup failed: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "backup written to", args[0])
 	return nil
 }

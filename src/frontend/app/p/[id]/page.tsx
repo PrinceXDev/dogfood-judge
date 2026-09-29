@@ -7,6 +7,7 @@ import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/icons";
 import { Comments } from "@/components/project/comments";
 import { ProjectIdentity } from "@/components/project/identity";
+import { ProjectLinks } from "@/components/project/links";
 import {
   BackLink,
   DataList,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui";
 import { api, getMe, load, rolesIn } from "@/lib/api";
 import { phase, votingOpen, when } from "@/lib/format";
+import { hostOf, linkState } from "@/lib/links";
 import type { Ballot, Comment, Event, Project } from "@/lib/types";
 
 export async function generateMetadata({
@@ -26,14 +28,6 @@ export async function generateMetadata({
   const { id } = await params;
   const p = await api<Project>(`/projects/${id}`).catch(() => null);
   return { title: p?.title ?? "Project" };
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
 
 export default async function ProjectPage({ params }: PageProps<"/p/[id]">) {
@@ -107,34 +101,7 @@ export default async function ProjectPage({ params }: PageProps<"/p/[id]">) {
             {p.team_name}
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              {p.repo_url && (
-                <a
-                  href={p.repo_url}
-                  rel="noopener nofollow"
-                  className={buttonClass("primary")}
-                >
-                  <Icon name="github" size={15} />
-                  Repository
-                  <Icon name="arrowUpRight" size={13} className="opacity-60" />
-                </a>
-              )}
-              {p.demo_url && (
-                <a
-                  href={p.demo_url}
-                  rel="noopener nofollow"
-                  className={buttonClass("accent")}
-                >
-                  Live demo
-                  <Icon name="arrowUpRight" size={13} />
-                </a>
-              )}
-              {!p.repo_url && !p.demo_url && (
-                <p className="text-sm text-muted">
-                  No repository or demo linked.
-                </p>
-              )}
-            </div>
+            <ProjectLinks p={p} size="md" primary />
             <p className="font-mono text-[11px] leading-relaxed text-muted">
               <span className="text-ink-2">{p.id}</span>
               {p.submitted_at ? (
@@ -197,6 +164,7 @@ export default async function ProjectPage({ params }: PageProps<"/p/[id]">) {
                     id="comment-body"
                     name="body"
                     required
+                    data-error-missing="Write your comment before posting it."
                     maxLength={2000}
                     rows={3}
                     className={`${inputCls} resize-y`}
@@ -373,6 +341,11 @@ export default async function ProjectPage({ params }: PageProps<"/p/[id]">) {
                         "Repo",
                         <span key="r" className="font-mono text-xs">
                           {hostOf(p.repo_url)}
+                          {linkState(p.repo_url) === "placeholder" && (
+                            <span className="ml-2 text-muted">
+                              (sample data)
+                            </span>
+                          )}
                         </span>,
                       ],
                     ] as [string, ReactNode][])

@@ -20,7 +20,7 @@ const FACTS: { icon: IconName; title: string; body: string }[] = [
   {
     icon: "wifiOff",
     title: "Runs offline",
-    body: "Self-hosted, with fonts and assets served locally. The portal makes no third-party requests.",
+    body: "Self-hosted, with fonts and assets served locally. Nothing leaves the portal unless its operator turns on a sign-in provider.",
   },
 ];
 

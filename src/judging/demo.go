@@ -118,7 +118,7 @@ func Demo(cfg DemoConfig, bootstrap int) *DemoResult {
 				sum += math.Max(1, math.Min(5, v))
 			}
 			s := sum / criteria
-			reviews = append(reviews, Review{j, p, s})
+			reviews = append(reviews, Review{Judge: j, Project: p, Score: s})
 			res.Reviews = append(res.Reviews, DemoReview{j, p, s})
 		}
 	}

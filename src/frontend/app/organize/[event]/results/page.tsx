@@ -3,6 +3,7 @@ import { publish, runTiebreak } from "@/app/actions";
 import { buttonClass } from "@/components/button";
 import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/icons";
+import { LiveRefresh } from "@/components/results/live-refresh";
 import { RankingTable } from "@/components/results/ranking";
 import {
   Callout,
@@ -15,13 +16,15 @@ import {
   Tag,
 } from "@/components/ui";
 import { BoundaryStrip } from "@/components/viz/boundary-strip";
+import { Calibration } from "@/components/viz/calibration";
 import { DefensibilityGraph } from "@/components/viz/defensibility-graph";
 import { NormalizationView } from "@/components/viz/normalization";
+import { RankDensity } from "@/components/viz/rank-density";
 import { ReviewInfluence } from "@/components/viz/review-influence";
 import { ScoreBreakdown } from "@/components/viz/score-breakdown";
 import { api, load, requireMe } from "@/lib/api";
 import { f2, pct, signedf, votingOpen } from "@/lib/format";
-import type { Results, Review } from "@/lib/types";
+import type { Progress, Results, Review } from "@/lib/types";
 
 const METHOD_NAMES: Record<string, string> = {
   raw: "Raw mean",
@@ -56,9 +59,32 @@ export default async function OrganizerResults({
   const moved = ranked.filter((x) => x.rank_change !== 0).length;
 
   // Every review's composite, for the per-judge and per-project breakdowns.
-  const reviews =
-    (await api<Review[] | null>(`/events/${e.id}/reviews`).catch(() => null)) ??
-    [];
+  const [reviewList, progress] = await Promise.all([
+    api<Review[] | null>(`/events/${e.id}/reviews`).catch(() => null),
+    api<Progress>(`/events/${e.id}/progress`).catch(() => null),
+  ]);
+  const reviews = reviewList ?? [];
+  const criteria = e.criteria ?? [];
+  const scaleMin = Math.min(...criteria.map((c) => c.scale_min), 1);
+  const scaleMax = Math.max(...criteria.map((c) => c.scale_max), scaleMin);
+  const titles = Object.fromEntries(
+    rows.map((x) => [x.project.id, x.project.title]),
+  );
+  const densities = ranked
+    .filter((x) => x.rank_dist?.length)
+    .map((x) => ({
+      id: x.project.id,
+      label: x.project.title,
+      dist: x.rank_dist ?? [],
+    }));
+  const pairTopK = (d: number[] | null) =>
+    d?.length
+      ? d.slice(0, k).reduce((a, b) => a + b, 0) /
+        Math.max(
+          1,
+          d.reduce((a, b) => a + b, 0),
+        )
+      : null;
   const judgeRow = new Map(judges.map((j) => [j.judge, j]));
 
   const publishForm = (
@@ -124,7 +150,18 @@ export default async function OrganizerResults({
             )}
           </span>
         }
-        actions={publishForm}
+        actions={
+          <div className="grid justify-items-end gap-2">
+            {publishForm}
+            {progress && !res.published && (
+              <LiveRefresh
+                eventId={e.id}
+                done={progress.done}
+                comparisons={progress.comparisons}
+              />
+            )}
+          </div>
+        }
       />
 
       {rep.components > 1 && (
@@ -343,6 +380,17 @@ export default async function OrganizerResults({
             <RankingTable rows={rows} k={k} detail />
           </Section>
 
+          {densities.length > 0 && (
+            <Section
+              id="uncertainty"
+              eyebrow="Rank uncertainty"
+              title="Where could each project really finish?"
+              desc={`Each strip shades the ranks a project reached across ${rep.bootstrap} bootstrap resamples, darker where it landed more often. Strips that overlap are ties the data can't break. Move the cut-off to read P(top n) for any prize size.`}
+            >
+              <RankDensity rows={densities} k={k} />
+            </Section>
+          )}
+
           <Section
             id="reviews"
             eyebrow="Outliers"
@@ -558,6 +606,34 @@ export default async function OrganizerResults({
               </Table>
             </Section>
           )}
+
+          {judges.length > 0 && rb && (
+            <Section
+              id="calibration"
+              eyebrow="Calibration"
+              title="Who scores differently, and does it matter?"
+              desc="Leniency with its 90% interval: only an interval that clears zero is a measurable difference, and the model has already corrected for it. The strip counts the criterion values each judge used; one bar means they gave one value to everything. Select a judge to see the prize ranking the engine gets without them."
+            >
+              <Calibration
+                judges={judges.map((j) => ({
+                  id: j.judge,
+                  label: j.name || j.judge,
+                  bias: j.bias,
+                  biasSe: j.bias_se,
+                  reviews: j.reviews,
+                  flags: j.flags ?? [],
+                  values: reviews
+                    .filter((v) => v.judge_id === j.judge)
+                    .flatMap((v) => Object.values(v.scores)),
+                }))}
+                scaleMin={scaleMin}
+                scaleMax={scaleMax}
+                topK={rb.top_k ?? []}
+                refitTopK={rb.refit_top_k ?? {}}
+                titles={titles}
+              />
+            </Section>
+          )}
         </>
       )}
 
@@ -575,6 +651,7 @@ export default async function OrganizerResults({
                 <th className={num}>Strength</th>
                 <th className={num}>± SE</th>
                 <th className={num}>Comparisons</th>
+                <th className={num}>P(top {k})</th>
               </tr>
             </thead>
             <tbody>
@@ -585,6 +662,11 @@ export default async function OrganizerResults({
                   <td className={num}>{signedf(p.strength)}</td>
                   <td className={num}>{f2(p.se)}</td>
                   <td className={num}>{p.comparisons}</td>
+                  <td className={num}>
+                    {pairTopK(p.rank_dist) === null
+                      ? "·"
+                      : pct(pairTopK(p.rank_dist) ?? 0)}
+                  </td>
                 </tr>
               ))}
             </tbody>

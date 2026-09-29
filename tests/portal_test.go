@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -78,6 +79,11 @@ func TestAuthorizationMatrix(t *testing.T) {
 		{"GET", "/api/v1/events/evt_01/judges", partToken, 403},
 		{"GET", "/api/v1/events/evt_01/votes/flagged", judgeA, 403},
 		{"GET", "/api/v1/events/evt_01/webhooks", judgeA, 403},
+		{"GET", "/api/v1/auth/providers", anon, 200},
+		{"GET", "/api/v1/events/evt_01/assignments", anon, 401},
+		{"GET", "/api/v1/events/evt_01/assignments", judgeA, 403},
+		{"GET", "/api/v1/events/evt_01/assignments", partToken, 403},
+		{"GET", "/api/v1/events/evt_01/assignments", orgToken, 200},
 		{"POST", "/api/v1/events/evt_01/assignments/run", judgeA, 403},
 		{"POST", "/api/v1/events/evt_01/publish", judgeA, 403},
 		{"POST", "/api/v1/events/evt_01/publish", partToken, 403},
@@ -280,6 +286,14 @@ func TestFullLifecycle(t *testing.T) {
 	}
 	p.must(p.api("POST", "/api/v1/events/"+slug+"/pairwise", j2, map[string]string{"a": offer.B.ID, "b": offer.A.ID, "outcome": "a"}), 409)
 	p.must(p.api("POST", "/api/v1/events/"+slug+"/pairwise", j2, map[string]string{"a": offer.A.ID, "b": offer.B.ID, "outcome": "a"}), 204)
+	if offer.Reason == "" || offer.PauseAfter != core.PauseAfter || offer.Streak != 0 {
+		t.Fatalf("offer explains nothing or miscounts the streak: %+v", offer)
+	}
+	var next core.PairOffer
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/pairwise/next", j2, nil), 200).JSON(t, &next)
+	if next.Streak != 1 || next.Done != 1 {
+		t.Fatalf("after one comparison: streak %d, done %d", next.Streak, next.Done)
+	}
 
 	// Finish reviews, check progress, publish.
 	var as []core.Assignment
@@ -641,6 +655,85 @@ func TestVerifiableResultsBundle(t *testing.T) {
 	if v := core.VerifyBundle(ed25519.PublicKey(pub), forged); v.Signature {
 		t.Fatal("forged manifest passed the signature check")
 	}
+
+	// v2: every review is committed under the manifest's Merkle root, and a
+	// judge's signed record proves each of their reviews is in it unchanged.
+	if v.Manifest.Type != core.ManifestV2 || v.ReviewRoot == nil || !*v.ReviewRoot ||
+		v.Manifest.ReviewCount != len(b.Inputs.Reviews) {
+		t.Fatalf("review root not committed: %+v", v.Manifest)
+	}
+	var rec struct {
+		Record  core.SignedRecord
+		Payload core.RecordPayload
+	}
+	p.must(p.api("GET", "/api/v1/events/"+slug+"/records/judge", judges[0], nil), 200).JSON(t, &rec)
+	if _, err := core.VerifyRecord(ed25519.PublicKey(pub), rec.Record); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Payload.ReviewLeaves) != rec.Payload.Reviews || rec.Payload.Pseudonym == "" {
+		t.Fatalf("record has %d leaves for %d reviews", len(rec.Payload.ReviewLeaves), rec.Payload.Reviews)
+	}
+	for _, c := range core.VerifyReviews(b, v.Manifest, rec.Payload.ReviewLeaves) {
+		if !c.OK {
+			t.Fatalf("genuine review %s failed: %s", c.Leaf, c.Problem)
+		}
+	}
+	// Change one of this judge's reviews in the bundle: it no longer appears,
+	// and the recomputed root no longer matches the signed one.
+	edited := b
+	edited.Inputs.Reviews = append([]core.BundleReview(nil), b.Inputs.Reviews...)
+	for i, r := range edited.Inputs.Reviews {
+		if r.Judge == rec.Payload.Pseudonym {
+			vals := map[string]int{}
+			for k, x := range r.Values {
+				vals[k] = x
+			}
+			vals["innovation"] = 1 + vals["innovation"]%5
+			edited.Inputs.Reviews[i].Values = vals
+			break
+		}
+	}
+	// The edited review's leaf is gone; proofs of the judge's other reviews
+	// that pass through the edited subtree no longer reach the root either.
+	missing := 0
+	for _, c := range core.VerifyReviews(edited, v.Manifest, rec.Payload.ReviewLeaves) {
+		if c.Index < 0 {
+			missing++
+		}
+	}
+	if missing != 1 {
+		t.Fatalf("editing one review left %d leaves missing, want 1", missing)
+	}
+	if ev := core.VerifyBundle(ed25519.PublicKey(pub), edited); ev.ReviewRoot == nil || *ev.ReviewRoot {
+		t.Fatal("edited reviews still match the signed review root")
+	}
+}
+
+// Inclusion proofs verify for every leaf of trees of every small size, and
+// fail against the wrong index or root.
+func TestMerkleInclusionProofs(t *testing.T) {
+	for n := 1; n <= 17; n++ {
+		in := core.BundleInputs{}
+		for i := range n {
+			in.Reviews = append(in.Reviews, core.BundleReview{Judge: "J-x", Project: fmt.Sprintf("prj_%02d", i), Values: map[string]int{"a": i}})
+		}
+		root := core.ReviewRoot(in)
+		for i := range n {
+			leaf := core.ReviewLeaf(in.Reviews[i])
+			path := core.InclusionProof(in, i)
+			if err := core.VerifyInclusion(leaf, i, n, path, root); err != nil {
+				t.Fatalf("n=%d i=%d: %v", n, i, err)
+			}
+			if n > 1 {
+				if core.VerifyInclusion(leaf, (i+1)%n, n, path, root) == nil {
+					t.Fatalf("n=%d i=%d: proof accepted at the wrong index", n, i)
+				}
+			}
+			if core.VerifyInclusion(leaf, i, n, path, strings.Repeat("0", 64)) == nil {
+				t.Fatalf("n=%d i=%d: proof accepted against the wrong root", n, i)
+			}
+		}
+	}
 }
 
 func TestTiebreakTargetsPrizeBoundary(t *testing.T) {
@@ -685,5 +778,34 @@ func TestPublicDemoEndpoints(t *testing.T) {
 	p.must(p.api("GET", "/api/v1/demo/simulate?projects=500&judges=4&coverage=3&seed=9", "", nil), 200).JSON(t, &d)
 	if d.Config["projects"].(float64) != 40 || len(d.Reviews) != 120 || d.Report["robustness"] == nil {
 		t.Fatalf("simulate: config %v, %d reviews", d.Config, len(d.Reviews))
+	}
+}
+
+// The organizer's assignment list covers every edge of the review graph with
+// a status, and only organizers can read it.
+func TestEventAssignmentsListEveryEdge(t *testing.T) {
+	p := newPortal(t)
+	var before core.Progress
+	p.must(p.api("GET", "/api/v1/events/evt_01/progress", orgToken, nil), 200).JSON(t, &before)
+	var as []core.EventAssignment
+	p.must(p.api("GET", "/api/v1/events/evt_01/assignments", orgToken, nil), 200).JSON(t, &as)
+	live, done := 0, 0
+	for _, a := range as {
+		switch a.Status {
+		case "pending":
+			live++
+		case "done":
+			live++
+			done++
+		case "recused":
+		default:
+			t.Fatalf("unknown status %q", a.Status)
+		}
+		if a.Judge == "" || a.Project == "" || a.JudgeName == "" || a.ProjectTitle == "" {
+			t.Fatalf("incomplete edge %+v", a)
+		}
+	}
+	if live != before.Assignments || done != before.Done {
+		t.Fatalf("list has %d live / %d done edges, progress says %d / %d", live, done, before.Assignments, before.Done)
 	}
 }

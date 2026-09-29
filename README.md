@@ -125,7 +125,7 @@ tests in `tests/` cover the same ground.
 |        | Public gallery with search and track/event filter                                                                  | `/projects`, `/events/{slug}/projects`            |
 | **T2** | Judge invitation (single-use links) and **assignment engine** (track match, COI, load balance, graph connectivity) | JUDGING.md §1                                     |
 |        | Weighted rubric the organizer configures                                                                           | _Settings → Rubric_                               |
-|        | **Backend role isolation** (39-case authorization matrix test)                                                     | `src/core`, `TestAuthorizationMatrix`             |
+|        | **Backend role isolation** (44-case authorization matrix test)                                                     | `src/core`, `TestAuthorizationMatrix`             |
 |        | Live organizer dashboard (polls every 5 s)                                                                         | `/organize/{slug}`                                |
 |        | **Cross-judge normalization, documented and validated**                                                            | JUDGING.md §3–4                                   |
 |        | CSV export (scores, results), formula-injection safe                                                               | `/api/v1/events/{e}/export/*.csv`                 |
@@ -159,23 +159,32 @@ go test ./...                                                   # unit + integra
 (cd src/frontend && npm run check && npm run build)             # route types, TypeScript, Biome, build
 go run ./src/cmd/dogfood normalize fixtures.json                # the normalization proof
 go run ./src/cmd/dogfood simulate fixtures.json                 # the Monte Carlo validation (~4 min)
+(cd src/frontend && npm test)                                   # organizer checklist unit tests
 ```
 
 `tests/` boots the whole portal in-process (real SQLite, real seed, real HTTP)
-and covers: the run.py checks, a 39-case authorization matrix, database-level
+and covers: the run.py checks, a 44-case authorization matrix, database-level
 deadline and conflict-of-interest enforcement, the full lifecycle (teams,
 invites, drafts, deadline, reviews, pairwise, publish, signed records), voting
 rules and hidden results, audit-chain tamper detection, CSRF, CSV injection,
 login rate limiting, webhook delivery and signatures, import/export round trip,
-the verifiable results bundle (genuine, tampered inputs, forged manifest) and
+the verifiable results bundle (genuine, tampered inputs, forged manifest),
+per-review Merkle inclusion proofs, the organizer assignment list and
 tie-breaker targeting. The maths has its own unit tests in `src/judging/`,
 including a planted rogue review that outlier detection must find.
 
 ## Operating it
 
-- **Data**: one SQLite file in the `dogfood-data` volume. Back it up with
-  `docker compose cp api:/data/dogfood.db ./backup.db` (stop first, or
-  use `sqlite3 .backup`). `docker compose down -v` resets to a fresh seed.
+- **Data**: one SQLite file in the `dogfood-data` volume. Back it up while
+  the server is running (SQLite `VACUUM INTO`, a consistent snapshot):
+  `docker compose exec api dogfood backup /data/backup-$(date +%F).db`, then
+  `docker compose cp api:/data/backup-$(date +%F).db .`. `docker compose down -v`
+  resets to a fresh seed.
+- **Restarts**: the API container has a `/healthz` check (the database must
+  answer) and the web container waits for it, so `docker compose up -d` after
+  an upgrade only serves pages once the API is ready. There is one SQLite
+  writer, so "zero downtime" here means graceful restarts and safe backups,
+  not rolling fleets.
 - **Real event**: set `DOGFOOD_DEMO=0`, set the admin password
   (`docker compose exec api dogfood set-password admin@dogfood.local`),
   and put it behind HTTPS with `DOGFOOD_SECURE_COOKIES=1` and
@@ -183,6 +192,17 @@ including a planted rogue review that outlier detection must find.
 - **Imported judges and participants** have no password until an organizer
   sends them an activation link (dashboard → _Activation link_). Sign-up
   deliberately cannot claim an imported email.
+- **Sign in with GitHub, Google, LinkedIn or X** (optional). Off by default,
+  so the portal stays offline. To turn one on, register an OAuth app with the
+  provider, set its redirect URI to
+  `${DOGFOOD_PUBLIC_URL}/api/v1/auth/<github|google|linkedin|x>/callback`, and
+  set `DOGFOOD_OAUTH_<PROVIDER>_CLIENT_ID` and `_CLIENT_SECRET` (see
+  [`.env.example`](.env.example)). The server logs each enabled provider and
+  its redirect URI at boot, and the sign-in and sign-up pages show its button.
+  People are matched by a verified email, so an imported judge who signs in
+  with Google under the same address gets their judge account, with no
+  activation link. X only shares an email once the X app is allowed to
+  request it; without one, sign-in with X is refused with an explanation.
 - **Moving data**: _Dashboard → Exports → full event JSON_, then
   `POST /api/v1/import` on another instance.
 

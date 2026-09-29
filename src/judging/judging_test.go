@@ -32,7 +32,7 @@ func loadFixtureReviews(t *testing.T) []Review {
 		for _, v := range s.Criteria {
 			sum += v
 		}
-		out = append(out, Review{s.Judge, s.Project, float64(sum) / float64(len(s.Criteria))})
+		out = append(out, Review{Judge: s.Judge, Project: s.Project, Score: float64(sum) / float64(len(s.Criteria))})
 	}
 	return out
 }
@@ -52,7 +52,7 @@ func TestFitModelRecoversPlantedEffects(t *testing.T) {
 	for p := range quality {
 		for k := 0; k < 4; k++ {
 			j := string(rune('a' + rng.IntN(12)))
-			reviews = append(reviews, Review{j, p, 3 + bias[j] + quality[p] + 0.05*rng.NormFloat64()})
+			reviews = append(reviews, Review{Judge: j, Project: p, Score: 3 + bias[j] + quality[p] + 0.05*rng.NormFloat64()})
 		}
 	}
 	f := FitModel(reviews, false, Options{})
@@ -232,7 +232,7 @@ func TestOutlierFindsPlantedRogueReview(t *testing.T) {
 			if p == "A" {
 				j = judges[k]
 			}
-			reviews = append(reviews, Review{j, p, 3 + q + 0.2*rng.NormFloat64()})
+			reviews = append(reviews, Review{Judge: j, Project: p, Score: 3 + q + 0.2*rng.NormFloat64()})
 		}
 	}
 	for i := range reviews {

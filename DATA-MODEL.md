@@ -21,6 +21,7 @@ applied automatically at boot and tracked in `schema_migrations`.
 
 ```
 users ─┬─< credentials            (sessions, API tokens, activation links; hashed)
+       ├─< user_identities        (GitHub / Google / LinkedIn / X sign-in, optional)
        ├─< event_roles >─ events  (organizer | judge | participant, per event)
        │                    ├─< tracks ─< prizes
        │                    ├─< criteria            (rubric: key, weight, scale)
@@ -42,6 +43,7 @@ audit_log                         (hash-chained, append-only)
 |---|---|---|
 | `users` | Accounts. `password_hash` NULL means imported and not yet activated. `is_admin` is the only global role. | `email` unique, case-insensitive |
 | `credentials` | Session, API and activation tokens. Only SHA-256 hashes are stored. | `kind` enum; activation tokens cannot authenticate |
+| `user_identities` | A sign-in provider's stable user id linked to an account, with the verified email it reported. An account can sign in if it has a password or an identity. Added in `0002_identities.sql`. | primary key `(provider, subject)`; cascades with the user |
 | `events` | Dates for submissions, judging, voting and publication; limits. | `open < close`; `voting_open < voting_close` |
 | `event_roles` | **Roles are per event.** The same person can judge one event and compete in another. | Trigger: judge and participant are mutually exclusive in an event |
 | `tracks`, `prizes`, `criteria` | Event configuration. | `UNIQUE(id, event_id)` so children can reference a track *of the same event* |
@@ -115,4 +117,5 @@ On the fixture: 41 projects, 126 reviews, 121 accounts, 1 duplicate
 
 Numbered files in `src/store/migrations/`, applied in order inside a
 transaction at boot, and recorded in `schema_migrations`. A new version adds
-`0002_*.sql`. Existing files are never edited once released.
+the next number: `0002_identities.sql` added sign-in providers. Existing files
+are never edited once released.

@@ -4,9 +4,36 @@
     {
       "name": "web-redesign",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "src/frontend", "--", "-p", "3100"],
-      "env": { "API_URL": "http://127.0.0.1:8090" },
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "src/frontend",
+        "--",
+        "-p",
+        "3100"
+      ],
+      "env": {
+        "API_URL": "http://127.0.0.1:8090"
+      },
       "port": 3100
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "go",
+      "runtimeArgs": [
+        "run",
+        "./src/cmd/dogfood",
+        "serve"
+      ],
+      "env": {
+        "DOGFOOD_ADDR": ":8090",
+        "DOGFOOD_DB": "data/preview.db",
+        "DOGFOOD_FIXTURES": "fixtures.json",
+        "DOGFOOD_DEMO": "1",
+        "DOGFOOD_FRONTEND_URL": "http://127.0.0.1:3100"
+      },
+      "port": 8090
     }
   ]
 }

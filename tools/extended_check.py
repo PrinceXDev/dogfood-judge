@@ -198,8 +198,13 @@ def main():
     try:
         d = json.loads(b)
         m = json.loads(base64.b64decode(d["manifest"]["payload"]))
-        ok = (s == 200 and m["type"] == "dogfood.results/v1" and len(m["input_digest"]) == 64
-              and len(m["ranking"]) == 40 and all(r["judge"].startswith("J-") for r in d["inputs"]["reviews"]))
+        # v2 adds a Merkle root over every review; v1 bundles are still valid.
+        v2 = m["type"] == "dogfood.results/v2"
+        ok = (s == 200 and m["type"] in ("dogfood.results/v1", "dogfood.results/v2")
+              and len(m["input_digest"]) == 64 and len(m["ranking"]) == 40
+              and all(r["judge"].startswith("J-") for r in d["inputs"]["reviews"])
+              and (not v2 or (len(m.get("review_root", "")) == 64
+                              and m.get("review_count") == len(d["inputs"]["reviews"]))))
     except Exception:  # noqa: BLE001
         ok = False
     check("BONUS", "signed, pseudonymized results bundle", ok, f"got {s}")

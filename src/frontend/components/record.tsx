@@ -227,6 +227,38 @@ export async function RecordView({
         </Link>
       </div>
 
+      {judge && !!payload.review_leaves?.length && (
+        <Section
+          className="no-print"
+          eyebrow="Your reviews"
+          title="Prove your reviews were counted"
+          desc={
+            <>
+              This record carries your pseudonym in the published results (
+              <span className="font-mono text-ink">{payload.pseudonym}</span>)
+              and a hash of each of your {payload.review_leaves.length} reviews.
+              Only you receive it, so the public bundle stays anonymous. Save
+              the record as JSON, download the results bundle, and run the check
+              below: it proves each review is in the published results
+              unchanged. It does not prove anyone scored honestly.
+            </>
+          }
+        >
+          <pre className="overflow-x-auto rounded-lg border border-line bg-surface-2/70 p-4 font-mono text-xs text-ink-2">
+            {`dogfood verify-review \\
+  --bundle ${payload.event_id}-results-bundle.json \\
+  --record record.json \\
+  --key "$(curl -s ${origin}/.well-known/dogfood-signing-key | jq -r .public_key)"`}
+          </pre>
+          <a
+            href={`/api/v1/events/${payload.event_id}/results/bundle`}
+            className={`${buttonClass("secondary", "sm")} mt-3`}
+          >
+            <Icon name="download" size={13} /> Results bundle
+          </a>
+        </Section>
+      )}
+
       <Section
         className="no-print"
         eyebrow="Machine-verifiable"

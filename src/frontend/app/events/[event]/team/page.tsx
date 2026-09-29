@@ -11,7 +11,8 @@ import {
 import { Countdown } from "@/components/account/countdown";
 import { buttonClass } from "@/components/button";
 import { ActionForm, CopyField, Submit } from "@/components/forms";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
+import { ProjectLinks } from "@/components/project/links";
 import {
   BackLink,
   Callout,
@@ -413,11 +414,6 @@ function LockedProject({
   p: Project;
   closed: boolean;
 }) {
-  const links: { href: string; label: string; icon: IconName }[] = [];
-  if (p.repo_url)
-    links.push({ href: p.repo_url, label: "Repository", icon: "github" });
-  if (p.demo_url)
-    links.push({ href: p.demo_url, label: "Demo", icon: "arrowUpRight" });
   return (
     <Panel
       title="Submission"
@@ -440,20 +436,9 @@ function LockedProject({
         </div>
         {p.track_name && <Tag tone="info">{p.track_name}</Tag>}
       </div>
-      {links.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {links.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonClass("secondary", "sm")}
-            >
-              <Icon name={l.icon} size={13} />
-              {l.label}
-            </a>
-          ))}
+      {(p.repo_url || p.demo_url) && (
+        <div className="mt-4">
+          <ProjectLinks p={p} empty={false} />
         </div>
       )}
       <Callout

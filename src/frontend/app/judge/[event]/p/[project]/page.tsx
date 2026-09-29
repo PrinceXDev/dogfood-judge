@@ -5,6 +5,7 @@ import { buttonClass } from "@/components/button";
 import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/icons";
 import { RubricForm } from "@/components/judge/rubric-form";
+import { ProjectLinks } from "@/components/project/links";
 import {
   Bar,
   Callout,
@@ -201,31 +202,8 @@ export default async function ReviewPage({
             </p>
           )}
           {(p.repo_url || p.demo_url) && (
-            <div className="mt-5 flex flex-wrap gap-2">
-              {p.repo_url && (
-                <a
-                  href={p.repo_url}
-                  target="_blank"
-                  rel="noopener nofollow"
-                  className={buttonClass("secondary", "sm")}
-                >
-                  <Icon name="github" size={13} />
-                  Repository
-                  <Icon name="arrowUpRight" size={12} className="text-muted" />
-                </a>
-              )}
-              {p.demo_url && (
-                <a
-                  href={p.demo_url}
-                  target="_blank"
-                  rel="noopener nofollow"
-                  className={buttonClass("secondary", "sm")}
-                >
-                  <Icon name="eye" size={13} />
-                  Live demo
-                  <Icon name="arrowUpRight" size={12} className="text-muted" />
-                </a>
-              )}
+            <div className="mt-5">
+              <ProjectLinks p={p} empty={false} />
             </div>
           )}
           {p.description ? (

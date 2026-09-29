@@ -5,13 +5,15 @@ import { useFormStatus } from "react-dom";
 import type { State } from "@/app/actions";
 import { type ButtonVariant, buttonClass } from "@/components/button";
 import { Icon } from "@/components/icons";
+import { useValidation, ValidationScope } from "@/components/validation";
 
 type Action = (state: State, fd: FormData) => Promise<State>;
 
 /**
- * A form bound to a server action. Shows the action's error or result
+ * A form bound to a server action. Validates with our own messages before
+ * sending (see validation.tsx), then shows the action's error or result
  * (including one-time links and secrets) beneath the fields. Works without
- * JavaScript too: the form posts and the page re-renders.
+ * JavaScript too: the browser's own checks apply and the page re-renders.
  */
 export function ActionForm({
   action,
@@ -25,15 +27,13 @@ export function ActionForm({
   confirm?: string;
 }) {
   const [state, formAction] = useActionState(action, null);
+  const { formProps, summary, scope } = useValidation((e) => {
+    if (confirm && !window.confirm(confirm)) e.preventDefault();
+  });
   return (
-    <form
-      action={formAction}
-      className={className}
-      onSubmit={(e) => {
-        if (confirm && !window.confirm(confirm)) e.preventDefault();
-      }}
-    >
-      {children}
+    <form action={formAction} className={className} {...formProps}>
+      <ValidationScope value={scope}>{children}</ValidationScope>
+      {summary}
       <Outcome state={state} />
     </form>
   );
@@ -120,7 +120,7 @@ export function CopyField({
 }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex min-w-0 items-stretch overflow-hidden rounded-md border border-line-strong bg-sunken">
+    <div className="flex min-w-0 items-stretch overflow-hidden rounded-md border border-line-strong bg-sunken transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent/15">
       <input
         readOnly
         value={value}

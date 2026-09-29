@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { buttonClass } from "@/components/button";
 import { Icon, type IconName } from "@/components/icons";
+import { FieldError } from "@/components/validation";
 import type { ApiError } from "@/lib/api";
 
 // Presentational building blocks. Server components; no state. Everything
@@ -555,7 +556,7 @@ export function Table({
 export const num = "text-right font-mono tabular whitespace-nowrap";
 
 export const inputCls =
-  "w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink transition-[border-color,box-shadow] duration-150 placeholder:text-muted/80 hover:border-muted/50 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/15";
+  "w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink transition-[border-color,box-shadow] duration-150 placeholder:text-muted/80 hover:border-muted/50 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/15 aria-[invalid=true]:border-bad/70 aria-[invalid=true]:focus:ring-bad/15";
 
 export function Field({
   label,
@@ -570,12 +571,13 @@ export function Field({
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children
     <label className="grid gap-1.5 text-[13px] font-medium text-ink">
       <span>
-        {label}
+        <span data-label>{label}</span>
         {hint && (
           <span className="ml-2 text-xs font-normal text-muted">{hint}</span>
         )}
       </span>
       {children}
+      <FieldError />
     </label>
   );
 }

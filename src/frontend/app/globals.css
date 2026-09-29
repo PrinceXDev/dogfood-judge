@@ -173,10 +173,55 @@ a {
   text-underline-offset: 3px;
 }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+/* In the base layer so component utilities (focus:ring, outline-none,
+   rounded-*) win over it; unlayered, it overrode them and drew a detached,
+   square ring around every field. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Text fields draw their own focus: an accent border and a soft ring
+     (inputCls), or on the bordered box around them (focus-within). */
+  :where(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    textarea,
+    select
+  ):focus-visible {
+    outline: none;
+  }
+
+  /* Tailwind's preflight gives buttons the default arrow; anything that acts
+     on click should say so. */
+  :where(
+    button,
+    [role="button"],
+    [role="tab"],
+    [role="option"],
+    summary,
+    select,
+    label[for],
+    label:has(> input[type="checkbox"], > input[type="radio"]),
+    input[type="checkbox"],
+    input[type="radio"],
+    input[type="range"],
+    input[type="file"],
+    input[type="submit"]
+  ):not(:disabled, [aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  :where(button, input, select, textarea):disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* A submit button disables itself while its action runs: that is waiting,
+     not forbidden. */
+  [aria-busy="true"] {
+    cursor: progress;
+  }
 }
 
 /* Fine measurement grid, used behind heroes and panels. */

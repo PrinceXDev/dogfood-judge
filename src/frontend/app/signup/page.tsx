@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { signup } from "@/app/actions";
 import { AuthShell } from "@/components/account/auth-shell";
+import { PasswordField } from "@/components/account/password-field";
+import { SocialSignIn } from "@/components/account/social-sign-in";
 import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/icons";
 import { Field, inputCls } from "@/components/ui";
@@ -37,12 +39,16 @@ export default async function Signup({ searchParams }: PageProps<"/signup">) {
         </>
       }
     >
+      <div className="mb-5">
+        <SocialSignIn next={next} verb="Sign up" />
+      </div>
       <ActionForm action={signup}>
         <input type="hidden" name="next" value={next} />
         <Field label="Name">
           <input
             name="name"
             maxLength={80}
+            data-error-missing="Tell us your name; judges and teammates see it."
             autoComplete="name"
             required
             className={inputCls}
@@ -58,15 +64,8 @@ export default async function Signup({ searchParams }: PageProps<"/signup">) {
             className={inputCls}
           />
         </Field>
-        <Field label="Password" hint="At least 10 characters.">
-          <input
-            type="password"
-            name="password"
-            minLength={10}
-            autoComplete="new-password"
-            required
-            className={inputCls}
-          />
+        <Field label="Password">
+          <PasswordField autoComplete="new-password" isNew />
         </Field>
         <Submit variant="accent" className="mt-1 w-full">
           Create account

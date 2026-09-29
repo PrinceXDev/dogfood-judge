@@ -10,6 +10,7 @@ import {
   SignatureGlyph,
 } from "@/components/trust/signature";
 import { Skeleton, Tag } from "@/components/ui";
+import { useValidation } from "@/components/validation";
 
 const dateFmt = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
@@ -24,15 +25,36 @@ const fmt = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : `${dateFmt.format(d)} UTC`;
 };
 
+// Caught before the round trip: the server would reject it anyway, but it
+// can say what is wrong while the user is still looking at the text.
+function jsonProblem(text: string): string {
+  if (!text.trim()) return "";
+  try {
+    const v = JSON.parse(text);
+    const rec = v && typeof v === "object" && "record" in v ? v.record : v;
+    if (
+      !rec ||
+      typeof rec.payload !== "string" ||
+      typeof rec.signature !== "string"
+    )
+      return "This JSON has no payload and signature: paste the record itself, not the page.";
+    return "";
+  } catch {
+    return "This isn't valid JSON. Paste the whole record, including the { and }.";
+  }
+}
+
 export function VerifyConsole({ keyId }: { keyId: string }) {
   const [state, action, pending] = useActionState(verifyProof, null);
   const [text, setText] = useState(state?.input ?? "");
+  const { formProps, summary } = useValidation();
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <form
         action={action}
-        className="flex flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-[var(--shadow)]"
+        {...formProps}
+        className="flex flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 has-[textarea:focus]:border-accent has-[textarea:focus]:ring-[3px] has-[textarea:focus]:ring-accent/15"
       >
         <header className="flex items-center justify-between gap-3 border-b border-line bg-surface-2/60 px-4 py-2.5">
           <label
@@ -50,16 +72,24 @@ export function VerifyConsole({ keyId }: { keyId: string }) {
           id="record"
           name="record"
           required
+          data-label="Record JSON"
+          data-error-missing="Paste a signed record, or the whole downloaded file, first."
           rows={11}
           spellCheck={false}
           autoComplete="off"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            e.target.setCustomValidity(jsonProblem(e.target.value));
+          }}
           placeholder={
             '{\n  "payload": "eyJ0eXBlIjoiZG9nZm9vZC5wYXJ0aWNpcGF0aW9uL3YxIi…",\n  "signature": "…",\n  "key_id": "…"\n}'
           }
           className="min-h-56 flex-1 resize-y bg-sunken px-4 py-3 font-mono text-xs leading-relaxed text-ink outline-none placeholder:text-muted/60 focus-visible:outline-none"
         />
+        {summary && (
+          <div className="border-t border-line px-4 pt-3">{summary}</div>
+        )}
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
           <p className="text-xs text-muted">
             Bare record or the full download both work.

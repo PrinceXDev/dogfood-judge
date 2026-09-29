@@ -1,9 +1,11 @@
 package judging
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"sort"
+	"strings"
 )
 
 // SimConfig describes a synthetic world. The review graph (who reviewed what)
@@ -80,7 +82,7 @@ func Simulate(cfg SimConfig) []SimMetric {
 				}
 				sum += math.Max(float64(cfg.ScaleMin), math.Min(float64(cfg.ScaleMax), v))
 			}
-			reviews = append(reviews, Review{pr.Judge, pr.Project, sum / float64(cfg.Criteria)})
+			reviews = append(reviews, Review{Judge: pr.Judge, Project: pr.Project, Score: sum / float64(cfg.Criteria)})
 		}
 		est := map[string]map[string]float64{
 			MethodRaw:    rawMeans(reviews),
@@ -128,15 +130,19 @@ func Simulate(cfg SimConfig) []SimMetric {
 // PairwiseSimResult compares adaptive and random pair selection at equal budget.
 type PairwiseSimResult struct {
 	Budget       int     `json:"budget"`
-	AdaptiveTau  float64 `json:"adaptive_tau"`
+	AdaptiveTau  float64 `json:"adaptive_tau"` // PairUncertainty, the live default
+	InfoTau      float64 `json:"info_tau"`     // PairInformation
 	RandomTau    float64 `json:"random_tau"`
 	AdaptiveTopK float64 `json:"adaptive_top_k"`
+	InfoTopK     float64 `json:"info_top_k"`
 	RandomTopK   float64 `json:"random_top_k"`
 }
 
 // SimulatePairwise draws true strengths for n projects and lets a pool of
 // judges answer comparisons under the Bradley-Terry model, choosing pairs
-// either with NextPair or uniformly at random.
+// with each PairStrategy (as the live system does, including the rule that
+// keeps a judge's previous projects out of their next pair) or uniformly at
+// random. Every arm sees the same true strengths in each trial.
 func SimulatePairwise(nProjects, nJudges int, budgets []int, trials int, seed uint64) []PairwiseSimResult {
 	rng := rand.New(rand.NewPCG(seed, 0x2545f4914f6cdd1d))
 	ids := make([]string, nProjects)
@@ -157,32 +163,39 @@ func SimulatePairwise(nProjects, nJudges int, budgets []int, trials int, seed ui
 				}
 				return 0
 			}
-			// adaptive
-			var cs []Comparison
-			seen := make([]map[[2]string]bool, nJudges)
-			for i := range seen {
-				seen[i] = map[[2]string]bool{}
-			}
-			pairCount := map[[2]string]int{}
-			fit := FitBT(nil, ids)
-			for k := 0; k < budget; k++ {
-				j := k % nJudges
-				a, b, ok := NextPair(fit, ids, seen[j], pairCount, rng)
-				if !ok {
-					continue
+			adaptive := func(st PairStrategy) *BTFit {
+				var cs []Comparison
+				seen := make([]map[[2]string]bool, nJudges)
+				last := make([]map[string]bool, nJudges)
+				for i := range seen {
+					seen[i] = map[[2]string]bool{}
 				}
-				seen[j][PairKey(a, b)] = true
-				pairCount[PairKey(a, b)]++
-				cs = append(cs, Comparison{A: a, B: b, Outcome: answer(a, b)})
-				if k%5 == 4 { // refit periodically, as the live system does per request
-					fit = FitBT(cs, ids)
+				pairCount := map[[2]string]int{}
+				fit := FitBT(nil, ids)
+				for k := 0; k < budget; k++ {
+					j := k % nJudges
+					a, b, ok := SelectPair(fit, ids, seen[j], pairCount, rng, PairPolicy{Strategy: st, Avoid: last[j]})
+					if !ok {
+						continue
+					}
+					seen[j][PairKey(a, b)] = true
+					last[j] = map[string]bool{a: true, b: true}
+					pairCount[PairKey(a, b)]++
+					cs = append(cs, Comparison{A: a, B: b, Outcome: answer(a, b)})
+					if k%5 == 4 { // refit periodically, as the live system does per request
+						fit = FitBT(cs, ids)
+					}
 				}
+				return FitBT(cs, ids)
 			}
-			fit = FitBT(cs, ids)
+			fit := adaptive(PairUncertainty)
 			res.AdaptiveTau += KendallTau(fit.Strength, truth)
 			res.AdaptiveTopK += topKOverlap(fit.Strength, truth, 5)
+			fit = adaptive(PairInformation)
+			res.InfoTau += KendallTau(fit.Strength, truth)
+			res.InfoTopK += topKOverlap(fit.Strength, truth, 5)
 			// random
-			cs = cs[:0]
+			var cs []Comparison
 			for k := 0; k < budget; k++ {
 				a := ids[rng.IntN(len(ids))]
 				b := ids[rng.IntN(len(ids))]
@@ -197,8 +210,10 @@ func SimulatePairwise(nProjects, nJudges int, budgets []int, trials int, seed ui
 		}
 		n := float64(trials)
 		res.AdaptiveTau /= n
+		res.InfoTau /= n
 		res.RandomTau /= n
 		res.AdaptiveTopK /= n
+		res.InfoTopK /= n
 		res.RandomTopK /= n
 		out = append(out, res)
 	}
@@ -219,4 +234,77 @@ func topKOverlap(est, truth map[string]float64, k int) float64 {
 // SortMetrics orders metrics by descending Kendall tau (for display).
 func SortMetrics(ms []SimMetric) {
 	sort.SliceStable(ms, func(a, b int) bool { return ms[a].KendallMean > ms[b].KendallMean })
+}
+
+// DriftSimResult measures the fatigue check: how often it flags a judge whose
+// scoring never changed, and how often it catches one that did.
+type DriftSimResult struct {
+	Judges        int     `json:"judges"`          // honest judges checked
+	FalseFlagRate float64 `json:"false_flag_rate"` // share of honest judges flagged
+	FlattenCaught float64 `json:"flatten_caught"`  // share of flattening judges flagged
+	ErraticCaught float64 `json:"erratic_caught"`  // share of erratic judges flagged
+}
+
+// SimulateDrift builds worlds where each judge writes perReview reviews in a
+// random order, fits the full model, and runs the drift check. In every world
+// one judge gives a constant score for their second half (flattening) and one
+// triples their noise for it (erratic); everyone else is unchanged.
+func SimulateDrift(perJudge, trials int, seed uint64) DriftSimResult {
+	rng := rand.New(rand.NewPCG(seed, 0x853c49e6748fea9b))
+	const nProjects, nJudges, center = 40, 12, 3.5
+	var res DriftSimResult
+	var flagged, flat, erratic float64
+	for t := 0; t < trials; t++ {
+		truth := make([]float64, nProjects)
+		for p := range truth {
+			truth[p] = 0.6 * rng.NormFloat64()
+		}
+		var reviews []Review
+		for j := 0; j < nJudges; j++ {
+			bias, scale := 0.45*rng.NormFloat64(), math.Exp(0.35*rng.NormFloat64())
+			for k, p := range rng.Perm(nProjects)[:perJudge] {
+				late := k >= perJudge/2
+				noise := 0.35
+				if j == 1 && late {
+					noise *= 3
+				}
+				v := center + bias + scale*truth[p] + noise*rng.NormFloat64()
+				if j == 0 && late {
+					v = math.Round(center + bias)
+				}
+				v = math.Max(1, math.Min(5, v))
+				reviews = append(reviews, Review{Judge: fmt.Sprintf("j%02d", j), Project: fmt.Sprintf("p%02d", p), Score: v, Seq: k + 1})
+			}
+		}
+		f := FitModel(reviews, true, Options{Bootstrap: -1})
+		js := judgeDiagnostics(reviews, f)
+		drift(js, reviews, f, seed+uint64(t))
+		for _, jr := range js {
+			hit := false
+			for _, fl := range jr.Flags {
+				if strings.HasPrefix(fl, "scores flattening") || strings.HasPrefix(fl, "scores becoming erratic") {
+					hit = true
+				}
+			}
+			switch jr.Judge {
+			case "j00":
+				if hit {
+					flat++
+				}
+			case "j01":
+				if hit {
+					erratic++
+				}
+			default:
+				res.Judges++
+				if hit {
+					flagged++
+				}
+			}
+		}
+	}
+	res.FalseFlagRate = flagged / float64(res.Judges)
+	res.FlattenCaught = flat / float64(trials)
+	res.ErraticCaught = erratic / float64(trials)
+	return res
 }

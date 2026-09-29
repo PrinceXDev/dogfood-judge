@@ -107,6 +107,7 @@ type Service struct {
 
 	cacheMu sync.Mutex
 	cache   map[string]*judging.Report
+	btCache map[string]map[string][]int // pairwise rank distributions
 }
 
 func New(ctx context.Context, db *store.DB) (*Service, error) {
