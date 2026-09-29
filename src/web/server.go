@@ -28,6 +28,9 @@ type Config struct {
 	TrustProxy    bool   // honour X-Forwarded-For from any peer (only behind a proxy you control)
 	PublicURL     string // base for links the API builds (invites, activations)
 	FrontendURL   string // Next.js server to proxy non-API paths to; empty = API only
+	// OAuth lists the sign-in providers the operator configured; empty (the
+	// default) keeps the instance fully offline.
+	OAuth []*core.OAuthProvider
 }
 
 type Server struct {

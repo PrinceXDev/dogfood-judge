@@ -38,6 +38,12 @@ type portal struct {
 // newPortal boots a fresh, seeded portal on an in-memory database.
 func newPortal(t *testing.T) *portal {
 	t.Helper()
+	return newPortalWith(t, web.Config{})
+}
+
+// newPortalWith is newPortal with a server configuration (e.g. sign-in providers).
+func newPortalWith(t *testing.T, cfg web.Config) *portal {
+	t.Helper()
 	db, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +56,7 @@ func newPortal(t *testing.T) *portal {
 	if err := seed.Run(ctx, svc, seed.Options{FixturesPath: "../fixtures.json", Demo: true, Out: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	h, err := web.New(svc, web.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h, err := web.New(svc, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

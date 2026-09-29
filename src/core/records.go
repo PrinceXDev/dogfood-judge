@@ -69,6 +69,11 @@ type RecordPayload struct {
 	Team         string `json:"team,omitempty"`
 	IssuedAt     string `json:"issued_at"`
 	KeyID        string `json:"key_id"`
+	// Judge records only: the judge's pseudonym in the event's results bundle
+	// and the Merkle leaf of each of their reviews, for `dogfood verify-review`.
+	// Only the judge receives this record, so the bundle stays anonymous.
+	Pseudonym    string   `json:"pseudonym,omitempty"`
+	ReviewLeaves []string `json:"review_leaves,omitempty"`
 }
 
 // SignedRecord carries the payload as the exact bytes that were signed, so
@@ -104,6 +109,16 @@ func (s *Service) JudgeRecord(ctx context.Context, a Actor, eventID string) (*Si
 	s.DB.QueryRowContext(ctx, `SELECT count(*) FROM comparisons WHERE event_id = ? AND judge_id = ?`, e.ID, a.User.ID).Scan(&p.Comparisons)
 	if p.Reviews == 0 && p.Comparisons == 0 {
 		return nil, nil, errConflict("nothing_to_certify", "no completed reviews in this event")
+	}
+	in, _, err := s.bundleInputs(ctx, e)
+	if err != nil {
+		return nil, nil, err
+	}
+	p.Pseudonym = s.pseudonym(e.ID, a.User.ID)
+	for _, r := range in.Reviews {
+		if r.Judge == p.Pseudonym {
+			p.ReviewLeaves = append(p.ReviewLeaves, ReviewLeaf(r))
+		}
 	}
 	rec, payload := s.sign(p)
 	return rec, payload, nil

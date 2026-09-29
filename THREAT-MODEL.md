@@ -104,7 +104,13 @@ ballot stuffing by one account; the rest is about many accounts:
 - Publication yields a signed manifest committing to the input fingerprint,
   the ranking and the audit hash of the publication. Anyone who saved the
   bundle can prove later that inputs or ranking changed.
-  *Test:* `TestVerifiableResultsBundle`.
+- Since manifest v2 the manifest also commits to a Merkle root over every
+  review. Each judge's signed record carries the leaf hash of their own
+  reviews, so a judge can prove, offline with `dogfood verify-review`, that
+  each of their reviews is in the published results unchanged. This proves
+  inclusion and integrity after publication, not honest scoring, and not that
+  the portal stored what the judge typed before publication.
+  *Tests:* `TestVerifiableResultsBundle`, `TestMerkleInclusionProofs`.
 
 ### Credential attacks
 - Passwords: PBKDF2-SHA256, 600,000 iterations, per-user salt, constant-time
@@ -115,6 +121,18 @@ ballot stuffing by one account; the rest is about many accounts:
 - Sign-up cannot claim an imported judge's or participant's email (that
   would inherit their role); those people activate through a one-time link an
   organizer issues. *Test:* `TestSignupCannotClaimImportedAccount`.
+- Sign-in providers (GitHub, Google, LinkedIn, X) are off unless the operator
+  configures them. When on, an account is matched by the provider's stable
+  user id, then by an email address the provider marks **verified**; an
+  unverified address is never matched to anyone. A verified address proves
+  ownership, so it may link to an imported account: that is the email
+  verification password sign-up lacks. The OAuth round trip carries a random
+  `state` and a PKCE verifier (where the provider supports it) in a sealed,
+  HttpOnly, 10-minute cookie scoped to `/api/v1/auth/`; a callback whose state
+  doesn't match is refused, and `next=` only accepts local paths.
+  *Test:* `TestSocialSignIn` (new account, returning identity, link by
+  verified email, unverified email refused, forged state refused, open
+  redirect refused).
 
 ### CSRF, XSS, clickjacking, CSV injection
 - Cookie sessions are `HttpOnly`, `SameSite=Lax`; every form carries an HMAC

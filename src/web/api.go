@@ -74,6 +74,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/me", a(s.apiMe))
 	mux.HandleFunc("POST /api/v1/tokens", a(s.apiCreateToken))
 	mux.HandleFunc("POST /api/v1/activate/{token}", a(s.apiActivate))
+	s.oauthRoutes(mux)
 
 	// events
 	mux.HandleFunc("GET /api/v1/events", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
@@ -398,6 +399,13 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 			return nil, err
 		}
 		return nil, s.svc.Recuse(r.Context(), actorOf(r), id, r.PathValue("project"), in.Reason)
+	}))
+	mux.HandleFunc("GET /api/v1/events/{event}/assignments", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id, err := s.eventParam(r)
+		if err != nil {
+			return nil, err
+		}
+		return s.svc.EventAssignments(r.Context(), actorOf(r), id)
 	}))
 	mux.HandleFunc("POST /api/v1/events/{event}/assignments/run", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
 		id, err := s.eventParam(r)

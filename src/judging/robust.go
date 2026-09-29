@@ -21,6 +21,9 @@ type Robustness struct {
 	PivotalTau   float64  `json:"pivotal_tau"`   // Kendall tau of the ranking without them
 	RunnerUpGap  float64  `json:"runner_up_gap"` // adjusted-score gap between first and second
 	WinnerMargin float64  `json:"winner_margin"` // gap in units of the pair's combined SE
+	// RefitTopK is the top k of each leave-one-judge-out refit, keyed by the
+	// removed judge, in rank order: "without this judge the top 3 becomes...".
+	RefitTopK map[string][]string `json:"refit_top_k"`
 }
 
 // OutlierReview is a single review the model cannot explain: the judge's own
@@ -59,7 +62,7 @@ func robustness(rep *Report, reviews []Review, full *Fit, opt Options) {
 	}
 	second := rep.Projects[1]
 	gap := primary[winner] - second.Scores[rep.Primary]
-	rb := &Robustness{Winner: winner, TopK: topK, RunnerUpGap: gap, PivotalTau: 1}
+	rb := &Robustness{Winner: winner, TopK: topK, RunnerUpGap: gap, PivotalTau: 1, RefitTopK: map[string][]string{}}
 	if se := math.Hypot(rep.Projects[0].SE, second.SE); se > 0 {
 		rb.WinnerMargin = gap / se
 	}
@@ -104,6 +107,13 @@ func robustness(rep *Report, reviews []Review, full *Fit, opt Options) {
 				jr.FlipsFirst = true
 			}
 		}
+		refitTop := make([]string, k)
+		for p, r := range ranks {
+			if r <= k {
+				refitTop[r-1] = p
+			}
+		}
+		rb.RefitTopK[j] = refitTop
 		changed := 0
 		for _, p := range topK {
 			if r, ok := ranks[p]; !ok || r > k {

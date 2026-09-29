@@ -105,6 +105,7 @@ export interface Review {
   scores: Record<string, number>;
   composite: number;
   comment: string;
+  created_at: string;
   updated_at: string;
 }
 
@@ -141,6 +142,8 @@ export interface Progress {
   comparisons: number;
   votes: number;
   flagged_votes: number;
+  pairwise_stability?: number;
+  stability_lag: number;
   updated_at: string;
 }
 
@@ -163,6 +166,8 @@ export interface ProjectResult {
   rank_change: number;
   provisional: boolean;
   ahead_of_next: number;
+  /** rank_dist[r - 1]: bootstrap replicates placing the project r-th. */
+  rank_dist: number[] | null;
 }
 
 export interface ResultRow extends ProjectResult {
@@ -185,6 +190,15 @@ export interface JudgeRow {
   outliers: number;
   flips_top_k: number;
   flips_first: boolean;
+  drift?: JudgeDrift;
+}
+
+export interface JudgeDrift {
+  reviews: number;
+  spread_ratio: number;
+  spread_p: number;
+  noise_ratio: number;
+  noise_p: number;
 }
 
 export interface Robustness {
@@ -199,6 +213,8 @@ export interface Robustness {
   pivotal_tau: number;
   runner_up_gap: number;
   winner_margin: number;
+  /** Organizers only: each leave-one-judge-out refit's top k, in rank order. */
+  refit_top_k?: Record<string, string[] | null> | null;
 }
 
 export interface OutlierReview {
@@ -238,6 +254,7 @@ export interface PairwiseRow {
   se: number;
   comparisons: number;
   rank: number;
+  rank_dist: number[] | null;
 }
 
 export interface VoteTally {
@@ -271,6 +288,9 @@ export interface PairOffer {
   a: Project | null;
   b: Project | null;
   done: number;
+  reason?: string;
+  streak: number;
+  pause_after: number;
 }
 
 export interface Comment {
@@ -348,6 +368,8 @@ export interface RecordPayload {
   team?: string;
   issued_at: string;
   key_id: string;
+  pseudonym?: string;
+  review_leaves?: string[];
 }
 
 export interface Manifest {
@@ -360,6 +382,9 @@ export interface Manifest {
   audit_anchor: string;
   ranking: { rank: number; project: string; title: string; adjusted: number }[];
   key_id: string;
+  /** v2 manifests: Merkle root over every review leaf. */
+  review_root?: string;
+  review_count?: number;
 }
 
 export interface Bundle {
@@ -376,6 +401,16 @@ export interface SigningKey {
 export interface DuplicatePair {
   original: Project;
   duplicate: Project;
+}
+
+export interface EventAssignment {
+  judge: string;
+  judge_name: string;
+  project: string;
+  project_title: string;
+  status: "pending" | "done" | "recused";
+  reason: string;
+  recuse_reason?: string;
 }
 
 export interface AssignReport {

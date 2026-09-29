@@ -33,6 +33,31 @@ tags:
   - name: public
 
 paths:
+  /auth/providers:
+    get:
+      tags: [auth]
+      security: []
+      summary: Sign-in providers this instance has configured (empty by default).
+      responses:
+        "200": { description: Providers, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string, enum: [github, google, linkedin, x] }, name: { type: string } } } } } } }
+  /auth/{provider}/start:
+    parameters: [{ name: provider, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [auth]
+      security: []
+      summary: Browser only. Redirects to the provider with a state and PKCE challenge; `next` is a local path to return to.
+      parameters: [{ name: next, in: query, schema: { type: string } }]
+      responses:
+        "302": { description: To the provider }
+        "303": { description: "To /login?error=oauth_unavailable when the provider is not configured" }
+  /auth/{provider}/callback:
+    parameters: [{ name: provider, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [auth]
+      security: []
+      summary: Browser only. The provider returns here; on success a session cookie is set and the browser goes to `next`, otherwise to /login?error=<code>.
+      responses:
+        "303": { description: Signed in, or back to sign-in with an error code }
   /auth/login:
     post:
       tags: [auth]
@@ -372,6 +397,12 @@ paths:
       tags: [judging]
       summary: Every review in the event (organizers).
       responses: { "200": { description: Reviews, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Review" } } } } } }
+  /events/{event}/assignments:
+    parameters: [{ $ref: "#/components/parameters/Event" }]
+    get:
+      tags: [judging]
+      summary: Every assignment in the event, pending, done or recused, with the engine's reason and any recusal reason (organizers).
+      responses: { "200": { description: Assignments, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/EventAssignment" } } } } } }
   /events/{event}/assignments/run:
     parameters: [{ $ref: "#/components/parameters/Event" }]
     post:
@@ -408,7 +439,19 @@ paths:
     get:
       tags: [results]
       summary: Live judging progress (organizers). The dashboard polls this.
-      responses: { "200": { description: Progress } }
+      responses:
+        "200":
+          description: Progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  done: { type: integer }
+                  assignments: { type: integer }
+                  comparisons: { type: integer }
+                  pairwise_stability: { type: number, description: "Kendall tau between the pairwise top 10 now and stability_lag comparisons ago; absent until there are 2 × stability_lag comparisons." }
+                  stability_lag: { type: integer }
   /events/{event}/results:
     parameters: [{ $ref: "#/components/parameters/Event" }]
     get:
@@ -740,6 +783,7 @@ components:
         scores: { type: object, additionalProperties: { type: integer } }
         composite: { type: number, description: "Σ weight × score / Σ weight" }
         comment: { type: string }
+        created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AssignReport:
       type: object
@@ -758,6 +802,19 @@ components:
         a: { $ref: "#/components/schemas/Project" }
         b: { $ref: "#/components/schemas/Project" }
         done: { type: integer }
+        reason: { type: string, description: "Why this pair was chosen, without revealing either project's strength or the favourite." }
+        streak: { type: integer, description: "Comparisons this judge made without a 15-minute break." }
+        pause_after: { type: integer, description: The streak length at which the UI suggests a pause. }
+    EventAssignment:
+      type: object
+      properties:
+        judge: { type: string }
+        judge_name: { type: string }
+        project: { type: string }
+        project_title: { type: string }
+        status: { type: string, enum: [pending, done, recused] }
+        reason: { type: string }
+        recuse_reason: { type: string }
     Results:
       type: object
       properties:
@@ -770,6 +827,10 @@ components:
             fit: { type: object }
             agreement: { type: object, additionalProperties: { type: number } }
             components: { type: integer }
+            robustness:
+              type: object
+              properties:
+                refit_top_k: { type: object, additionalProperties: { type: array, items: { type: string } }, description: "Organizers only: the top k of each leave-one-judge-out refit, keyed by the removed judge." }
         rows:
           type: array
           items:
@@ -785,8 +846,28 @@ components:
               prob_top_k: { type: number }
               rank_change: { type: integer }
               provisional: { type: boolean }
-        judges: { type: array, description: Organizers only. }
-        pairwise: { type: array }
+              rank_dist: { type: array, items: { type: integer }, description: "rank_dist[r-1] = bootstrap replicates placing the project r-th; sums to report.bootstrap." }
+        judges:
+          type: array
+          description: Organizers only.
+          items:
+            type: object
+            properties:
+              drift:
+                type: object
+                description: First vs second half of the judge's reviews, in writing order (8+ reviews). See JUDGING.md.
+                properties:
+                  reviews: { type: integer }
+                  spread_ratio: { type: number }
+                  spread_p: { type: number }
+                  noise_ratio: { type: number }
+                  noise_p: { type: number }
+        pairwise:
+          type: array
+          items:
+            type: object
+            properties:
+              rank_dist: { type: array, items: { type: integer }, description: Bootstrap rank counts over resampled comparisons. }
         votes: { type: array }
         excluded: { type: array, items: { $ref: "#/components/schemas/Project" } }
     SignedRecord:
@@ -808,11 +889,23 @@ components:
             criteria: { type: array, items: { type: object, properties: { key: { type: string }, weight: { type: number } } } }
             reviews: { type: array, items: { type: object, properties: { judge: { type: string, description: Pseudonym }, project: { type: string }, values: { type: object, additionalProperties: { type: integer } } } } }
             excluded: { type: array, items: { type: string } }
+    Manifest:
+      type: object
+      description: The decoded manifest payload. v2 adds review_root and review_count; v1 bundles still verify.
+      properties:
+        type: { type: string, enum: [dogfood.results/v1, dogfood.results/v2] }
+        input_digest: { type: string }
+        review_root: { type: string, description: "RFC 6962 Merkle root over H(pseudonym ‖ project ‖ canonical values) for every review, in bundle order." }
+        review_count: { type: integer }
     RecordResponse:
       type: object
       properties:
         record: { $ref: "#/components/schemas/SignedRecord" }
-        payload: { type: object }
+        payload:
+          type: object
+          properties:
+            pseudonym: { type: string, description: Judge records only. The judge's pseudonym in the results bundle. }
+            review_leaves: { type: array, items: { type: string }, description: "Judge records only. Leaf hashes for `dogfood verify-review`." }
     Doc:
       type: object
       description: Superset of the DOGFOOD fixtures.json format.

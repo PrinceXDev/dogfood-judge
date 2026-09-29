@@ -80,7 +80,13 @@ export function LiveProgress({
       `fewer than ${target} reviewers`,
       p.unassigned ? "warn" : undefined,
     ],
-    ["Pairwise", String(p.comparisons), "comparisons"],
+    [
+      "Pairwise",
+      String(p.comparisons),
+      p.pairwise_stability === undefined
+        ? "comparisons"
+        : `top-10 order τ = ${p.pairwise_stability.toFixed(2)} vs ${p.stability_lag} ago`,
+    ],
     [
       "Community votes",
       String(p.votes),

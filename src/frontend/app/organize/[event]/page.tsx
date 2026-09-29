@@ -18,10 +18,19 @@ import {
   Tag,
   type Tone,
 } from "@/components/ui";
+import { AssignmentGraph } from "@/components/viz/assignment-graph";
 import { api, load, requireMe } from "@/lib/api";
+import { onBoundary } from "@/lib/checklist";
 import { f2, pct, votingOpen, when } from "@/lib/format";
 import { timeline } from "@/lib/timeline";
-import type { Event, JudgeSummary, Progress, Results } from "@/lib/types";
+import type {
+  Event,
+  EventAssignment,
+  JudgeSummary,
+  Progress,
+  Project,
+  Results,
+} from "@/lib/types";
 
 type Alert = {
   id: string;
@@ -44,19 +53,29 @@ export default async function CommandCenter({
   const pr = await load<Progress>(`/events/${e.id}/progress`, here);
   if (!pr.ok) return <Problem error={pr.error} />;
   const p = pr.data;
-  const [judges, results] = await Promise.all([
+  const [judges, results, assignments, allProjects] = await Promise.all([
     api<JudgeSummary[] | null>(`/events/${e.id}/judges`).then((j) => j ?? []),
     api<Results>(`/events/${e.id}/results`).catch(() => null),
+    api<EventAssignment[] | null>(`/events/${e.id}/assignments`)
+      .then((a) => a ?? [])
+      .catch(() => []),
+    api<Project[] | null>(`/events/${e.id}/all-projects`)
+      .then((ps) => ps ?? [])
+      .catch(() => []),
   ]);
+  const liveProjects = allProjects
+    .filter(
+      (x) =>
+        x.status === "submitted" && !x.duplicate_of && !x.disqualified_reason,
+    )
+    .map((x) => ({ id: x.id, title: x.title }));
   const track = new Map((e.tracks ?? []).map((t) => [t.id, t.name]));
   const ranked = (results?.rows ?? []).filter((x) => x.ranks.biasscale);
   const rep = results?.report;
   const rb = rep?.robustness;
   const winner = ranked[0];
   const k = rep?.top_k ?? 3;
-  const boundary = ranked.filter(
-    (x) => x.prob_top_k > 0.05 && x.prob_top_k < 0.95,
-  ).length;
+  const boundary = onBoundary(ranked).length;
 
   // Attention items, each derived from real data and pointing at where to act.
   const alerts: Alert[] = [];
@@ -550,6 +569,24 @@ export default async function CommandCenter({
             </Panel>
           </div>
         </div>
+        {assignments.length > 0 && (
+          <Panel
+            title="Review graph"
+            icon="split"
+            className="mt-6"
+            aside={
+              <span className="font-mono">
+                {assignments.length} assignments
+              </span>
+            }
+          >
+            <AssignmentGraph
+              assignments={assignments}
+              projects={liveProjects}
+              assignHref="#judges"
+            />
+          </Panel>
+        )}
       </section>
     </>
   );

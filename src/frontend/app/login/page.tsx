@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { login } from "@/app/actions";
 import { AuthShell } from "@/components/account/auth-shell";
+import { PasswordField } from "@/components/account/password-field";
+import {
+  authErrorMessage,
+  SocialSignIn,
+} from "@/components/account/social-sign-in";
 import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/icons";
 import { Field, inputCls } from "@/components/ui";
@@ -9,7 +14,11 @@ import { Field, inputCls } from "@/components/ui";
 export const metadata: Metadata = { title: "Sign in" };
 
 export default async function Login({ searchParams }: PageProps<"/login">) {
-  const next = String((await searchParams).next ?? "/");
+  const sp = await searchParams;
+  const next = String(sp.next ?? "/");
+  const problem = authErrorMessage(
+    typeof sp.error === "string" ? sp.error : undefined,
+  );
   return (
     <AuthShell
       eyebrow="Sign in"
@@ -37,6 +46,18 @@ export default async function Login({ searchParams }: PageProps<"/login">) {
         </>
       }
     >
+      {problem && (
+        <p
+          role="alert"
+          className="mb-5 flex items-start gap-2 rounded-md border border-bad/30 bg-bad/[0.07] px-3 py-2 text-sm text-ink"
+        >
+          <Icon name="alert" size={15} className="mt-0.5 shrink-0 text-bad" />
+          {problem}
+        </p>
+      )}
+      <div className="mb-5">
+        <SocialSignIn next={next} />
+      </div>
       <ActionForm action={login}>
         <input type="hidden" name="next" value={next} />
         <Field label="Email">
@@ -50,13 +71,7 @@ export default async function Login({ searchParams }: PageProps<"/login">) {
           />
         </Field>
         <Field label="Password">
-          <input
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-            className={inputCls}
-          />
+          <PasswordField autoComplete="current-password" />
         </Field>
         <Submit variant="accent" className="mt-1 w-full">
           Sign in

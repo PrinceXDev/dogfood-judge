@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { buttonClass } from "@/components/button";
 import { CopyField } from "@/components/forms";
 import { Icon } from "@/components/icons";
@@ -258,6 +259,29 @@ export default async function PublicResults({
                     "Audit anchor",
                     <Hash key="a" value={manifest.audit_anchor} head={20} />,
                   ],
+                  ...(manifest.review_root
+                    ? ([
+                        [
+                          "Review root",
+                          <span key="r" className="grid gap-0.5">
+                            <Hash
+                              value={manifest.review_root}
+                              head={20}
+                              className="text-accent"
+                            />
+                            <span className="text-[11px] text-muted">
+                              All {manifest.review_count ?? 0} reviews
+                              committed. A judge can prove each of theirs is
+                              here, unchanged, with{" "}
+                              <span className="font-mono">
+                                dogfood verify-review
+                              </span>
+                              .
+                            </span>
+                          </span>,
+                        ],
+                      ] as [string, ReactNode][])
+                    : []),
                   [
                     "Engine",
                     <span key="e" className="font-mono text-xs">

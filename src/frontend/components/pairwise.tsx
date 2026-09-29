@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { compare } from "@/app/actions";
 import { Outcome } from "@/components/forms";
 import { Icon } from "@/components/icons";
+import { ProjectLinks } from "@/components/project/links";
 import { Kbd, Tag } from "@/components/ui";
 import type { Project } from "@/lib/types";
 
@@ -60,28 +61,9 @@ function Side({
       )}
       <div className="flex-1" />
       {(p.repo_url || p.demo_url) && (
-        <p className="mt-4 flex flex-wrap gap-4 text-sm">
-          {p.repo_url && (
-            <a
-              href={p.repo_url}
-              target="_blank"
-              rel="noopener nofollow"
-              className="inline-flex items-center gap-1 text-accent hover:underline"
-            >
-              Repository <Icon name="arrowUpRight" size={12} />
-            </a>
-          )}
-          {p.demo_url && (
-            <a
-              href={p.demo_url}
-              target="_blank"
-              rel="noopener nofollow"
-              className="inline-flex items-center gap-1 text-accent hover:underline"
-            >
-              Demo <Icon name="arrowUpRight" size={12} />
-            </a>
-          )}
-        </p>
+        <div className="mt-4">
+          <ProjectLinks p={p} empty={false} />
+        </div>
       )}
       <button
         type="submit"

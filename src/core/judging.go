@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -24,7 +25,7 @@ type JudgeSummary struct {
 	Tracks   []string `json:"tracks"`
 	Assigned int      `json:"assigned"`
 	Done     int      `json:"done"`
-	CanLogin bool     `json:"can_login"` // false: imported, needs an activation link
+	CanLogin bool     `json:"can_login"` // false: imported, needs an activation link or a linked sign-in provider
 }
 
 func (s *Service) Judges(ctx context.Context, a Actor, eventID string) ([]JudgeSummary, error) {
@@ -35,7 +36,7 @@ func (s *Service) Judges(ctx context.Context, a Actor, eventID string) ([]JudgeS
 		(SELECT count(*) FROM assignments x WHERE x.event_id = r.event_id AND x.judge_id = u.id AND x.status <> 'recused'),
 		(SELECT count(*) FROM assignments x WHERE x.event_id = r.event_id AND x.judge_id = u.id AND x.status = 'done'),
 		coalesce((SELECT group_concat(track_id) FROM judge_tracks t WHERE t.event_id = r.event_id AND t.user_id = u.id), ''),
-		u.password_hash IS NOT NULL
+		u.password_hash IS NOT NULL OR EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = u.id)
 		FROM event_roles r JOIN users u ON u.id = r.user_id WHERE r.event_id = ? AND r.role = 'judge' ORDER BY u.name`, eventID)
 	if err != nil {
 		return nil, err
@@ -177,6 +178,64 @@ func (s *Service) Recuse(ctx context.Context, a Actor, eventID, projectID, reaso
 	})
 }
 
+// EventAssignment is one judge-project edge of the review graph, for the
+// organizer's assignment and conflict-of-interest view.
+type EventAssignment struct {
+	Judge        string `json:"judge"`
+	JudgeName    string `json:"judge_name"`
+	Project      string `json:"project"`
+	ProjectTitle string `json:"project_title"`
+	Status       string `json:"status"` // pending | done | recused
+	Reason       string `json:"reason"` // why the engine chose this judge
+	RecuseReason string `json:"recuse_reason,omitempty"`
+}
+
+// EventAssignments lists every assignment in an event, organizers only.
+// Recusal reasons live in the audit log, which is where Recuse records them.
+func (s *Service) EventAssignments(ctx context.Context, a Actor, eventID string) ([]EventAssignment, error) {
+	if err := s.require(ctx, s.DB, a, eventID, RoleOrganizer); err != nil {
+		return nil, err
+	}
+	recused := map[[2]string]string{}
+	rows, err := s.DB.QueryContext(ctx, `SELECT actor_id, target, detail FROM audit_log
+		WHERE event_id = ? AND action = 'assignment.recuse' ORDER BY seq`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var judge, project, detail string
+		if err := rows.Scan(&judge, &project, &detail); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		var d struct {
+			Reason string `json:"reason"`
+		}
+		json.Unmarshal([]byte(detail), &d)
+		recused[[2]string{judge, project}] = d.Reason
+	}
+	rows.Close()
+	rows, err = s.DB.QueryContext(ctx, `SELECT x.judge_id, u.name, x.project_id, p.title, x.status, x.reason
+		FROM assignments x JOIN users u ON u.id = x.judge_id JOIN projects p ON p.id = x.project_id
+		WHERE x.event_id = ? ORDER BY u.name, p.title`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EventAssignment{}
+	for rows.Next() {
+		var x EventAssignment
+		if err := rows.Scan(&x.Judge, &x.JudgeName, &x.Project, &x.ProjectTitle, &x.Status, &x.Reason); err != nil {
+			return nil, err
+		}
+		if x.Status == "recused" {
+			x.RecuseReason = recused[[2]string{x.Judge, x.Project}]
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // Reviews
 
@@ -198,6 +257,7 @@ type Review struct {
 	Scores    map[string]int `json:"scores"` // criterion key -> value
 	Composite float64        `json:"composite"`
 	Comment   string         `json:"comment"`
+	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
@@ -251,7 +311,7 @@ func (s *Service) MyAssignments(ctx context.Context, a Actor, eventID string) ([
 
 // reviews loads reviews matching a WHERE fragment on the reviews table (alias rv).
 func (s *Service) reviews(ctx context.Context, q store.Queryer, where string, args ...any) ([]*Review, error) {
-	rows, err := q.QueryContext(ctx, `SELECT rv.judge_id, u.name, rv.project_id, rv.event_id, rv.comment, rv.updated_at,
+	rows, err := q.QueryContext(ctx, `SELECT rv.judge_id, u.name, rv.project_id, rv.event_id, rv.comment, rv.created_at, rv.updated_at,
 		c.key, c.weight, rs.value
 		FROM reviews rv JOIN users u ON u.id = rv.judge_id
 		JOIN review_scores rs ON rs.judge_id = rv.judge_id AND rs.project_id = rv.project_id
@@ -265,16 +325,16 @@ func (s *Service) reviews(ctx context.Context, q store.Queryer, where string, ar
 	idx := map[[2]string]*Review{}
 	weights := map[*Review][2]float64{}
 	for rows.Next() {
-		var jid, jname, pid, eid, comment, updated, key string
+		var jid, jname, pid, eid, comment, created, updated, key string
 		var w float64
 		var v int
-		if err := rows.Scan(&jid, &jname, &pid, &eid, &comment, &updated, &key, &w, &v); err != nil {
+		if err := rows.Scan(&jid, &jname, &pid, &eid, &comment, &created, &updated, &key, &w, &v); err != nil {
 			return nil, err
 		}
 		r := idx[[2]string{jid, pid}]
 		if r == nil {
 			r = &Review{JudgeID: jid, JudgeName: jname, ProjectID: pid, EventID: eid, Comment: comment,
-				UpdatedAt: mustTime(updated), Scores: map[string]int{}}
+				CreatedAt: mustTime(created), UpdatedAt: mustTime(updated), Scores: map[string]int{}}
 			idx[[2]string{jid, pid}] = r
 			out = append(out, r)
 		}
@@ -456,8 +516,15 @@ type Progress struct {
 	Comparisons     int             `json:"comparisons"`
 	Votes           int             `json:"votes"`
 	FlaggedVotes    int             `json:"flagged_votes"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	// PairwiseStability is Kendall's tau between the current pairwise top 10
+	// and its order StabilityLag comparisons ago; absent until there are
+	// 2*StabilityLag comparisons.
+	PairwiseStability *float64  `json:"pairwise_stability,omitempty"`
+	StabilityLag      int       `json:"stability_lag"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
+
+const StabilityLag = 10
 
 type JudgeProgress struct {
 	ID       string     `json:"id"`
@@ -481,6 +548,12 @@ func (s *Service) Progress(ctx context.Context, a Actor, eventID string) (*Progr
 	s.DB.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE event_id = ? AND status = 'draft'`, e.ID).Scan(&p.Drafts)
 	s.DB.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(status = 'done'), 0) FROM assignments WHERE event_id = ? AND status <> 'recused'`, e.ID).Scan(&p.Assignments, &p.Done)
 	s.DB.QueryRowContext(ctx, `SELECT count(*) FROM comparisons WHERE event_id = ?`, e.ID).Scan(&p.Comparisons)
+	p.StabilityLag = StabilityLag
+	if p.Comparisons >= 2*StabilityLag {
+		if err := s.pairwiseStability(ctx, e.ID, p); err != nil {
+			return nil, err
+		}
+	}
 	s.DB.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(flagged IS NOT NULL), 0) FROM votes WHERE event_id = ?`, e.ID).Scan(&p.Votes, &p.FlaggedVotes)
 	if p.Assignments > 0 {
 		p.Percent = 100 * float64(p.Done) / float64(p.Assignments)
@@ -528,6 +601,37 @@ func (s *Service) Progress(ctx context.Context, a Actor, eventID string) (*Progr
 	return p, rows.Err()
 }
 
+func (s *Service) pairwiseStability(ctx context.Context, eventID string, p *Progress) error {
+	cs, err := s.comparisons(ctx, s.DB, eventID)
+	if err != nil {
+		return err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM projects WHERE event_id = ? AND status = 'submitted'
+		AND duplicate_of IS NULL AND disqualified_reason IS NULL ORDER BY id`, eventID)
+	if err != nil {
+		return err
+	}
+	live := map[string]bool{}
+	var ids []string
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		live[id] = true
+		ids = append(ids, id)
+	}
+	rows.Close()
+	var kept []judging.Comparison
+	for _, c := range cs {
+		if live[c.A] && live[c.B] {
+			kept = append(kept, c)
+		}
+	}
+	if tau, ok := judging.Stability(kept, ids, StabilityLag, 10); ok {
+		p.PairwiseStability = &tau
+	}
+	return rows.Err()
+}
+
 func completion(j JudgeProgress) float64 {
 	if j.Assigned == 0 {
 		return 2
@@ -565,7 +669,11 @@ type PairwiseRow struct {
 	SE          float64  `json:"se"`
 	Comparisons int      `json:"comparisons"`
 	Rank        int      `json:"rank"`
+	RankDist    []int    `json:"rank_dist"` // bootstrap rank counts, as for scored results
 }
+
+// PairwiseBootstrap is the replicate count behind PairwiseRow.RankDist.
+const PairwiseBootstrap = 300
 
 // Results computes the full judging analysis. Organizers can see it at any
 // time; everyone else only after publication, and never with judge identities.
@@ -617,6 +725,7 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 		input = append(input, judging.Review{Judge: r.JudgeID, Project: r.ProjectID, Score: r.Composite})
 		names[r.JudgeID] = r.JudgeName
 	}
+	writeOrder(input, all)
 	res.Report = s.analyze(e, input, bootstrap)
 	ranked := map[string]bool{}
 	for _, pr := range res.Report.Projects {
@@ -642,6 +751,11 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 		}
 	} else {
 		res.Report.Judges = nil // judge diagnostics are for organizers only
+		if rb := res.Report.Robustness; rb != nil {
+			scrubbed := *rb // the report is a shallow copy of the cache: copy before editing
+			scrubbed.RefitTopK = nil
+			res.Report.Robustness = &scrubbed
+		}
 	}
 	res.Pairwise, err = s.pairwiseRanking(ctx, e.ID, projects)
 	if err != nil {
@@ -686,7 +800,19 @@ type PairOffer struct {
 	A       *Project `json:"a"`
 	B       *Project `json:"b"`
 	Done    int      `json:"done"` // comparisons this judge has made
+	// Reason says why this pair was chosen without revealing either
+	// project's strength or which one the model favours.
+	Reason string `json:"reason,omitempty"`
+	// Streak counts this judge's comparisons made without a break of
+	// StreakGap; past PauseAfter the UI suggests a pause.
+	Streak     int `json:"streak"`
+	PauseAfter int `json:"pause_after"`
 }
+
+const (
+	StreakGap  = 15 * time.Minute
+	PauseAfter = 20
+)
 
 // NextPair returns the judge's current pair, choosing a new informative one if needed.
 func (s *Service) NextPair(ctx context.Context, a Actor, eventID string) (*PairOffer, error) {
@@ -700,19 +826,13 @@ func (s *Service) NextPair(ctx context.Context, a Actor, eventID string) (*PairO
 	if !e.JudgingOpen(s.now()) {
 		return nil, &Error{KindForbidden, "judging_closed", "judging is not open for this event"}
 	}
-	var offer PairOffer
-	offer.EventID = e.ID
+	offer := PairOffer{EventID: e.ID, PauseAfter: PauseAfter}
 	err = s.DB.Tx(ctx, func(tx *sql.Tx) error {
-		tx.QueryRowContext(ctx, `SELECT count(*) FROM comparisons WHERE event_id = ? AND judge_id = ?`, e.ID, a.User.ID).Scan(&offer.Done)
-		var pa, pb string
-		err := tx.QueryRowContext(ctx, `SELECT project_a, project_b FROM pairwise_offers WHERE event_id = ? AND judge_id = ?`, e.ID, a.User.ID).Scan(&pa, &pb)
-		if err == nil {
-			offer.A, offer.B = &Project{ID: pa}, &Project{ID: pb}
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		mine, err := s.judgeComparisonTimes(ctx, tx, e.ID, a.User.ID)
+		if err != nil {
 			return err
 		}
+		offer.Done, offer.Streak = len(mine), streak(mine, s.now())
 		cands, err := s.pairCandidates(ctx, tx, e.ID, a.User.ID)
 		if err != nil {
 			return err
@@ -721,21 +841,34 @@ func (s *Service) NextPair(ctx context.Context, a Actor, eventID string) (*PairO
 		if err != nil {
 			return err
 		}
+		fit := judging.FitBT(cs, cands)
+		var pa, pb string
+		err = tx.QueryRowContext(ctx, `SELECT project_a, project_b FROM pairwise_offers WHERE event_id = ? AND judge_id = ?`, e.ID, a.User.ID).Scan(&pa, &pb)
+		if err == nil {
+			offer.A, offer.B = &Project{ID: pa}, &Project{ID: pb}
+			offer.Reason = judging.PairReason(fit, pa, pb)
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		seen := map[[2]string]bool{}
 		pairCount := map[[2]string]int{}
+		var last map[string]bool
 		for _, c := range cs {
 			k := judging.PairKey(c.A, c.B)
 			pairCount[k]++
 			if c.Judge == a.User.ID {
 				seen[k] = true
+				last = map[string]bool{c.A: true, c.B: true} // comparisons are in id order
 			}
 		}
-		fit := judging.FitBT(cs, cands)
 		rng := rand.New(rand.NewPCG(seedFrom(a.User.ID), uint64(s.now().UnixNano())))
-		x, y, ok := judging.NextPair(fit, cands, seen, pairCount, rng)
+		x, y, ok := judging.SelectPair(fit, cands, seen, pairCount, rng, judging.PairPolicy{Avoid: last})
 		if !ok {
 			return nil
 		}
+		offer.Reason = judging.PairReason(fit, x, y)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO pairwise_offers (event_id, judge_id, project_a, project_b, offered_at) VALUES (?, ?, ?, ?, ?)`,
 			e.ID, a.User.ID, x, y, s.nowS()); err != nil {
 			return err
@@ -753,6 +886,39 @@ func (s *Service) NextPair(ctx context.Context, a Actor, eventID string) (*PairO
 		return nil, err
 	}
 	return &offer, nil
+}
+
+// judgeComparisonTimes returns when the judge made each comparison, oldest first.
+func (s *Service) judgeComparisonTimes(ctx context.Context, q store.Queryer, eventID, judgeID string) ([]time.Time, error) {
+	rows, err := q.QueryContext(ctx, `SELECT created_at FROM comparisons WHERE event_id = ? AND judge_id = ? ORDER BY id`, eventID, judgeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var at string
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		out = append(out, mustTime(at))
+	}
+	return out, rows.Err()
+}
+
+// streak counts the trailing comparisons with no gap longer than StreakGap
+// between them, or between the last one and now.
+func streak(times []time.Time, now time.Time) int {
+	n := 0
+	next := now
+	for i := len(times) - 1; i >= 0; i-- {
+		if next.Sub(times[i]) > StreakGap {
+			break
+		}
+		n++
+		next = times[i]
+	}
+	return n
 }
 
 // pairCandidates: live projects in the judge's tracks (all tracks if the judge
@@ -855,13 +1021,65 @@ func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects 
 	sort.Strings(ids)
 	fit := judging.FitBT(live, ids)
 	ranks := judging.RankOf(fit.Strength)
+	dist := s.pairwiseDist(eventID, live, ids)
 	var out []PairwiseRow
 	for _, id := range ids {
 		out = append(out, PairwiseRow{Project: projects[id], Strength: fit.Strength[id], SE: fit.SE[id],
-			Comparisons: fit.Comparisons[id], Rank: ranks[id]})
+			Comparisons: fit.Comparisons[id], Rank: ranks[id], RankDist: dist[id]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
 	return out, nil
+}
+
+// pairwiseDist memoises judging.BTRankDist by a hash of its inputs, like analyze.
+func (s *Service) pairwiseDist(eventID string, cs []judging.Comparison, ids []string) map[string][]int {
+	h := sha256.New()
+	fmt.Fprintf(h, "bt|%s|%d|%s|", eventID, PairwiseBootstrap, strings.Join(ids, ","))
+	for _, c := range cs {
+		fmt.Fprintf(h, "%s,%s,%s,%g;", c.Judge, c.A, c.B, c.Outcome)
+	}
+	key := hex.EncodeToString(h.Sum(nil))
+	s.cacheMu.Lock()
+	d, ok := s.btCache[key]
+	s.cacheMu.Unlock()
+	if ok {
+		return d
+	}
+	d = judging.BTRankDist(cs, ids, PairwiseBootstrap, seedFrom(eventID))
+	s.cacheMu.Lock()
+	if s.btCache == nil || len(s.btCache) >= 64 {
+		s.btCache = map[string]map[string][]int{}
+	}
+	s.btCache[key] = d
+	s.cacheMu.Unlock()
+	return d
+}
+
+// writeOrder numbers each judge's reviews in the order they were first
+// written (Review.Seq), for the engine's drift check. Ties on created_at fall
+// back to project id so the numbering is deterministic.
+func writeOrder(input []judging.Review, all []*Review) {
+	created := map[[2]string]time.Time{}
+	for _, r := range all {
+		created[[2]string{r.JudgeID, r.ProjectID}] = r.CreatedAt
+	}
+	byJudge := map[string][]int{}
+	for i, r := range input {
+		byJudge[r.Judge] = append(byJudge[r.Judge], i)
+	}
+	for _, idx := range byJudge {
+		sort.Slice(idx, func(a, b int) bool {
+			x, y := input[idx[a]], input[idx[b]]
+			tx, ty := created[[2]string{x.Judge, x.Project}], created[[2]string{y.Judge, y.Project}]
+			if !tx.Equal(ty) {
+				return tx.Before(ty)
+			}
+			return x.Project < y.Project
+		})
+		for n, i := range idx {
+			input[i].Seq = n + 1
+		}
+	}
 }
 
 // analyze memoises judging.Analyze by a hash of its exact inputs, so the
@@ -878,7 +1096,7 @@ func (s *Service) analyze(e *Event, input []judging.Review, bootstrap int) *judg
 		return sorted[i].Judge < sorted[j].Judge
 	})
 	for _, r := range sorted {
-		fmt.Fprintf(h, "%s,%s,%.9f;", r.Judge, r.Project, r.Score)
+		fmt.Fprintf(h, "%s,%s,%.9f,%d;", r.Judge, r.Project, r.Score, r.Seq)
 	}
 	key := hex.EncodeToString(h.Sum(nil))
 	s.cacheMu.Lock()

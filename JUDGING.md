@@ -189,6 +189,14 @@ For each project the organizer sees:
   CLI, with a fixed seed so the numbers are reproducible. Refits warm-start
   from the full fit.
 
+The bootstrap also returns each project's **rank distribution**,
+`rank_dist[r-1]` = the number of replicates in which it placed r-th. It sums
+to the replicate count, P(top k) is its first k bins, and P(top n) for any
+other prize size falls out on the client without a refit. The results page
+draws it for the top 10: strips that overlap are ties the data cannot break.
+Pairwise mode gets the same output by resampling the comparisons with
+replacement and refitting Bradley–Terry (300 replicates, memoised by input).
+
 Prize decisions should be made on "P(top 3)", not on the ordinal rank. On the
 fixture the leader has **P(top 3) = 51%** and ranks 1–6: the data does not
 crown a clear winner, and the portal says so rather than implying otherwise.
@@ -256,6 +264,19 @@ is refitted** without their reviews. The report shows:
   means the two are indistinguishable, and the UI tags it *tie*.
 - **Judge influence**: 1 − τ between the full ranking and the ranking without
   that judge, plus a *decides #1* tag if their removal flips the winner.
+
+- **Without this judge** (`refit_top_k`): the top k of every refit, keyed by
+  the removed judge. It costs nothing extra, since the refit already ranks
+  every project, and it lets the calibration panel say "without jdg_24 the
+  top 3 becomes {A, B, D}". Organizers only.
+
+The calibration panel draws each judge's leniency with a 90% interval
+(±1.645 SE) against zero, and beside it a histogram of the criterion values
+they actually used, so a judge who only ever gives 4 is visible at a glance.
+There is deliberately **no** "reweight this judge by 0.6" control: the model
+already estimates each judge's scale and leniency from the data, and a
+hand-picked weight has no principled value. The defensible what-if is
+removing a judge, which is what the refit does.
 
 **On the fixture**, the honest answer is uncomfortable:
 
@@ -370,19 +391,46 @@ judge's tracks, excluding conflicts and pairs this judge has already seen:
 maximise $p(1-p) \,/\, (1+n_{ij}) \,/\, \sqrt{1+\min(n_i,n_j)}$. That is
 outcome uncertainty, discounted for pairs and projects already compared
 often. Near-ties are broken at random, and left/right is randomised to cancel
-position bias.
+position bias. The projects in the judge's previous comparison are kept out
+of their next pair whenever any other pair exists, so one project's
+impression does not carry straight into the next verdict.
 
-**Validation** (40 projects, Bradley–Terry ground truth, equal budgets):
+**Why this pair.** Each offer carries a reason the judge sees: "neither
+project has been compared yet", "the model can't separate these two yet:
+about 52/48, either way", or "spreads comparisons evenly: these two have 3
+and 4 comparisons so far". The reason is symmetric in the two projects, so it
+never says which one the model favours (`TestPairReasonDoesNotRevealTheFavourite`).
+After 20 comparisons without a 15-minute break the judge is offered a pause.
 
-| Comparisons | Adaptive τ | Random τ |
-|---:|---:|---:|
-| 80 | 0.498 | 0.461 |
-| 160 | 0.624 | 0.571 |
-| 320 | 0.735 | 0.702 |
-| 640 | 0.805 | 0.784 |
+**A variance-based rule, tested and not shipped.** The obvious upgrade scores
+a pair by the expected drop in $SE_a^2 + SE_b^2$ from one more comparison: one
+verdict adds Fisher information $w = p(1-p)$ along $u = e_a - e_b$, and the
+Sherman–Morrison update of the covariance $C$ removes
+$w\,(Cu)(Cu)^\top / (1 + w\,u^\top C u)$. It targets uncertain *projects*
+rather than merely close pairs. The simulation below decides: it is worse
+at 80 and 160 comparisons, mixed at 320 (better top 5, worse τ) and better
+only at 640, so the live rule stays the default and the variance rule is
+kept as `PairInformation` for the simulation. Calling selection "information gain" would only be honest if the
+simulation backed it, and it does not.
 
-Adaptive selection is consistently better. The gain is largest at small
-budgets, which is where hackathons live.
+**Convergence.** The command center shows Kendall's τ between the current
+pairwise top 10 and the same projects' order 10 comparisons earlier ("top-10
+order τ = 0.93"). Nothing is stored; it is recomputed from the comparisons
+table, and shown once there are 20 comparisons.
+
+**Validation** (40 projects, Bradley–Terry ground truth, equal budgets; the
+live rule includes the previous-pair exclusion):
+
+| Comparisons | Adaptive tau | Variance tau | Random tau | Adaptive top-5 | Variance top-5 | Random top-5 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 80 | 0.481 | 0.446 | 0.466 | 47.0% | 45.8% | 43.8% |
+| 160 | 0.623 | 0.584 | 0.583 | 60.4% | 60.2% | 56.6% |
+| 320 | 0.731 | 0.708 | 0.702 | 67.6% | 70.2% | 67.0% |
+| 640 | 0.804 | 0.806 | 0.779 | 75.6% | 80.2% | 73.6% |
+
+Adaptive selection beats random at every budget, and the gain is largest at
+small budgets, which is where hackathons live. The variance rule is ahead on
+both measures only at 640 comparisons, more than most events collect.
 
 **Why not Crowd-BT** (Chen et al. 2013, which also estimates each judge's
 reliability)? It adds one parameter per judge to a model that already has one
@@ -390,6 +438,44 @@ per project. With 30 judges making maybe 20 comparisons each, that roughly
 doubles the parameters on the same evidence. The per-judge flag in §3.4 gives
 the organizer the same signal without the overfitting risk. It is the natural
 next step once an event has an order of magnitude more comparisons.
+
+---
+
+## 5a. Judge fatigue signals
+
+The schema records when a review was written, not when the judge opened the
+project, so true time-per-review cannot be measured, and the gap between two
+reviews includes breaks. What can be measured is whether a judge's scoring
+*changes* over their session (`judging/fatigue.go`). For every judge with at
+least 8 reviews, in the order they wrote them:
+
+- **Scores flattening**: SD of the scores in the second half ÷ SD in the
+  first half. Well below 1 means the judge stopped using the scale.
+- **Scores becoming erratic**: the same ratio for residuals from the fitted
+  model. Well above 1 means the judge's scores stopped tracking what the
+  other judges saw.
+
+Each ratio is a **permutation test**: if nothing changed, every ordering of the
+judge's reviews is equally likely, so the observed ratio is compared with the
+ratio over 2000 random reorderings, one-sided at 2.5% per check. That fixes
+the false-flag rate near 5% per judge by construction, whatever the judge's
+load; the simulation measures it through the whole pipeline:
+
+| Reviews per judge | Honest judges | False flags | Flattening caught | Erratic caught |
+|---:|---:|---:|---:|---:|
+| 8 | 2000 | 3.6% | 98% | 8% |
+| 10 | 2000 | 3.8% | 99% | 14% |
+| 16 | 2000 | 4.8% | 100% | 46% |
+| 24 | 2000 | 4.7% | 100% | 67% |
+
+Flattening is caught reliably. Erratic scoring is hard to see with a
+handful of reviews: tripled noise in 5 reviews out of 10 is rarely
+distinguishable from bad luck, and power only grows with load. The fixture's
+judges wrote 2–11 reviews each, so on it this check mostly stays quiet, which
+is the honest outcome. Like every judge flag, a drift flag is a prompt to
+look, not a verdict. There is no `opened_at` column: recording when a judge
+opens a project would record judge behaviour, and is left for organizers to
+ask for.
 
 ---
 
@@ -407,7 +493,7 @@ next step once an event has an order of magnitude more comparisons.
 
 All of this is enforced in `src/core` (the service layer). The Next.js
 interface is just another API client, so it cannot bypass it.
-`tests/portal_test.go: TestAuthorizationMatrix` checks 39 (endpoint, role)
+`tests/portal_test.go: TestAuthorizationMatrix` checks 44 (endpoint, role)
 pairs. Publishing is refused while community voting is open, and judging
 closes when results are published.
 
@@ -454,6 +540,38 @@ differ in the last bits across CPU architectures, and any rank difference
 must be explained by such a near-exact tie. `TestVerifiableResultsBundle`
 covers the genuine, tampered-input and forged-manifest cases.
 
+### 7.1 Per-review inclusion proofs (manifest v2)
+
+A v2 manifest (`dogfood.results/v2`) also commits to `review_root`, a Merkle
+root over one leaf per review in the bundle's sorted order:
+
+$$\text{leaf} = H(\texttt{0x00} \,\|\, \text{pseudonym} \,\|\, \texttt{0x1f} \,\|\, \text{project} \,\|\, \texttt{0x1f} \,\|\, \text{values as sorted-key JSON})$$
+
+The tree follows RFC 6962 (Certificate Transparency): interior nodes are
+$H(\texttt{0x01} \,\|\, l \,\|\, r)$ and an n-leaf tree splits at the
+largest power of two below n, so no leaf is ever duplicated. The public
+results page shows "all N reviews committed under root …" next to the input
+fingerprint. v1 bundles still verify; they simply have no root to check.
+
+A judge's signed record now carries their pseudonym for the event and the
+leaf hash of each of their reviews. Only the judge receives it, so the public
+bundle stays anonymous. Then
+
+```
+dogfood verify-review --bundle bundle.json --record record.json --key <public key>
+```
+
+checks both signatures, recomputes the root from the bundle, and for each of
+the judge's leaves finds it in the bundle and verifies its inclusion path up
+to the signed root. A review that was changed or left out after publication
+has no leaf to find. `TestVerifiableResultsBundle` covers a genuine record
+and an edited review; `TestMerkleInclusionProofs` checks every leaf of trees
+of 1 to 17 leaves and rejects wrong indices and roots.
+
+This proves inclusion and integrity after publication. It does not prove that
+a judge scored honestly, or that the portal recorded what the judge typed
+before publication: for that the judge would need to have kept their own copy.
+
 What this proves: the published ranking follows from the published inputs
 under the published method. What it cannot prove: that the inputs are what
 judges actually entered. That is what the audit chain is for, and the
@@ -465,6 +583,7 @@ manifest's anchor ties the two together.
 
 - The model assumes leniency is additive and constant within an event. A
   judge who is harsh early and lenient late is modelled as their average.
+  The drift check (§5a) flags a change in *spread*, not a shift in level.
 - $\tau_s$ and $\tau_q$ are fixed priors. The simulation shows the method is
   robust across realistic effect sizes, but they are assumptions, stated.
 - The bootstrap resamples reviews within projects. It captures review noise,

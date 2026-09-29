@@ -136,8 +136,15 @@ type ManifestEntry struct {
 	Adjusted float64 `json:"adjusted"`
 }
 
+// ManifestV1 and ManifestV2 name the manifest formats. v2 adds ReviewRoot;
+// bundles signed as v1 still verify.
+const (
+	ManifestV1 = "dogfood.results/v1"
+	ManifestV2 = "dogfood.results/v2"
+)
+
 type Manifest struct {
-	Type        string          `json:"type"` // dogfood.results/v1
+	Type        string          `json:"type"` // ManifestV1 or ManifestV2
 	EventID     string          `json:"event_id"`
 	EventName   string          `json:"event_name"`
 	PublishedAt string          `json:"published_at"`
@@ -146,6 +153,9 @@ type Manifest struct {
 	AuditAnchor string          `json:"audit_anchor"` // hash of the results.publish audit entry
 	Ranking     []ManifestEntry `json:"ranking"`
 	KeyID       string          `json:"key_id"`
+	// ReviewRoot (v2) is the Merkle root over every review leaf, in bundle order.
+	ReviewRoot  string `json:"review_root,omitempty"`
+	ReviewCount int    `json:"review_count,omitempty"`
 }
 
 type ResultsBundle struct {
@@ -215,13 +225,39 @@ func (s *Service) Bundle(ctx context.Context, a Actor, eventID string) (*Results
 	if !e.Published() && !roles[RoleOrganizer] {
 		return nil, errForbidden("results are not published yet")
 	}
+	in, titles, err := s.bundleInputs(ctx, e)
+	if err != nil {
+		return nil, err
+	}
+	m := Manifest{Type: ManifestV2, EventID: e.ID, EventName: e.Name, Engine: EngineVersion,
+		InputDigest: InputDigest(in), Ranking: RankInputs(in), KeyID: s.signer.KeyID,
+		ReviewRoot: ReviewRoot(in), ReviewCount: len(in.Reviews)}
+	for i := range m.Ranking {
+		m.Ranking[i].Title = titles[m.Ranking[i].Project]
+	}
+	if e.ResultsPublishedAt != nil {
+		m.PublishedAt = store.FormatTime(*e.ResultsPublishedAt)
+		s.DB.QueryRowContext(ctx, `SELECT hash FROM audit_log WHERE event_id = ? AND action = 'results.publish' ORDER BY seq DESC LIMIT 1`,
+			e.ID).Scan(&m.AuditAnchor)
+	}
+	body, _ := json.Marshal(m)
+	return &ResultsBundle{
+		Manifest: SignedRecord{Payload: base64.StdEncoding.EncodeToString(body),
+			Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(s.signer.priv, body)), KeyID: s.signer.KeyID},
+		Inputs: in,
+	}, nil
+}
+
+// bundleInputs gathers the anonymized inputs of an event's results, plus
+// project titles. Judge records use it too, so their leaves match the bundle's.
+func (s *Service) bundleInputs(ctx context.Context, e *Event) (BundleInputs, map[string]string, error) {
 	titles := map[string]string{}
 	live := map[string]bool{}
 	in := BundleInputs{EventID: e.ID, ReviewsPerProject: e.ReviewsPerProject, Excluded: []string{}}
 	rows, err := s.DB.QueryContext(ctx, `SELECT id, title, duplicate_of IS NOT NULL OR disqualified_reason IS NOT NULL
 		FROM projects WHERE event_id = ? AND status = 'submitted' ORDER BY id`, e.ID)
 	if err != nil {
-		return nil, err
+		return in, nil, err
 	}
 	for rows.Next() {
 		var id, title string
@@ -240,7 +276,7 @@ func (s *Service) Bundle(ctx context.Context, a Actor, eventID string) (*Results
 	}
 	rs, err := s.reviews(ctx, s.DB, "rv.event_id = ?", e.ID)
 	if err != nil {
-		return nil, err
+		return in, nil, err
 	}
 	for _, r := range rs {
 		if live[r.ProjectID] {
@@ -253,22 +289,7 @@ func (s *Service) Bundle(ctx context.Context, a Actor, eventID string) (*Results
 		}
 		return in.Reviews[i].Judge < in.Reviews[j].Judge
 	})
-	m := Manifest{Type: "dogfood.results/v1", EventID: e.ID, EventName: e.Name, Engine: EngineVersion,
-		InputDigest: InputDigest(in), Ranking: RankInputs(in), KeyID: s.signer.KeyID}
-	for i := range m.Ranking {
-		m.Ranking[i].Title = titles[m.Ranking[i].Project]
-	}
-	if e.ResultsPublishedAt != nil {
-		m.PublishedAt = store.FormatTime(*e.ResultsPublishedAt)
-		s.DB.QueryRowContext(ctx, `SELECT hash FROM audit_log WHERE event_id = ? AND action = 'results.publish' ORDER BY seq DESC LIMIT 1`,
-			e.ID).Scan(&m.AuditAnchor)
-	}
-	body, _ := json.Marshal(m)
-	return &ResultsBundle{
-		Manifest: SignedRecord{Payload: base64.StdEncoding.EncodeToString(body),
-			Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(s.signer.priv, body)), KeyID: s.signer.KeyID},
-		Inputs: in,
-	}, nil
+	return in, titles, nil
 }
 
 // BundleVerification is what the offline verifier reports.
@@ -277,8 +298,10 @@ type BundleVerification struct {
 	Signature  bool      `json:"signature_valid"`
 	Digest     bool      `json:"digest_matches"`
 	Reproduced bool      `json:"ranking_reproduced"`
-	MaxDelta   float64   `json:"max_score_delta"`
-	Problems   []string  `json:"problems"`
+	// ReviewRoot is nil for v1 manifests, which carry no root to check.
+	ReviewRoot *bool    `json:"review_root_matches,omitempty"`
+	MaxDelta   float64  `json:"max_score_delta"`
+	Problems   []string `json:"problems"`
 }
 
 // VerifyBundle checks the signature, recomputes the input digest, and re-runs
@@ -306,6 +329,13 @@ func VerifyBundle(pub ed25519.PublicKey, b ResultsBundle) BundleVerification {
 	v.Digest = InputDigest(b.Inputs) == m.InputDigest
 	if !v.Digest {
 		v.Problems = append(v.Problems, "inputs do not match the digest in the signed manifest: reviews were added, removed or changed")
+	}
+	if m.Type == ManifestV2 {
+		ok := ReviewRoot(b.Inputs) == m.ReviewRoot && m.ReviewCount == len(b.Inputs.Reviews)
+		v.ReviewRoot = &ok
+		if !ok {
+			v.Problems = append(v.Problems, "reviews do not hash to the review root in the signed manifest")
+		}
 	}
 	got := RankInputs(b.Inputs)
 	want := map[string]ManifestEntry{}

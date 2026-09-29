@@ -295,12 +295,14 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 func (s *Service) UserByID(ctx context.Context, id string) (*User, error) {
 	var u User
 	var hash sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id, email, name, is_admin, password_hash FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &hash)
+	var linked bool
+	err := s.DB.QueryRowContext(ctx, `SELECT id, email, name, is_admin, password_hash,
+		EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id) FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &hash, &linked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errNotFound("user")
 	}
-	u.CanLogin = hash.Valid
+	u.CanLogin = hash.Valid || linked
 	return &u, err
 }
 

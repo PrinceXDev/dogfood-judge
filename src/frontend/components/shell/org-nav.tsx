@@ -14,6 +14,7 @@ const GROUPS: [string, Entry[]][] = [
     "Operate",
     [
       { label: "Overview", path: "", icon: "activity" },
+      { label: "Playbook", path: "/playbook", icon: "check" },
       { label: "Judges & assignments", path: "#judges", icon: "users" },
       { label: "Results", path: "/results", icon: "trophy" },
       {

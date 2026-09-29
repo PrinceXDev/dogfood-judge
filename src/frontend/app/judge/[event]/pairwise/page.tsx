@@ -5,6 +5,7 @@ import { Icon } from "@/components/icons";
 import { PairwiseForm } from "@/components/pairwise";
 import {
   BackLink,
+  Callout,
   EmptyState,
   Kbd,
   Page,
@@ -79,12 +80,30 @@ export default async function Pairwise({
             : "Comparisons aren't being accepted for this event."}
         </EmptyState>
       ) : offer?.a && offer.b ? (
-        <PairwiseForm
-          key={`${offer.a.id}:${offer.b.id}`}
-          event={e.id}
-          a={offer.a}
-          b={offer.b}
-        />
+        <>
+          {offer.streak >= offer.pause_after && (
+            <Callout tone="info" title="Time for a short break?">
+              You've made {offer.streak} comparisons in a row. Verdicts drift
+              when attention does; this pair will still be here when you come
+              back.
+            </Callout>
+          )}
+          {offer.reason && (
+            <p className="mb-4 flex items-center gap-2 text-sm text-muted">
+              <Icon name="info" size={14} className="shrink-0" />
+              <span>
+                <span className="text-ink-2">Why this pair: </span>
+                {offer.reason}
+              </span>
+            </p>
+          )}
+          <PairwiseForm
+            key={`${offer.a.id}:${offer.b.id}`}
+            event={e.id}
+            a={offer.a}
+            b={offer.b}
+          />
+        </>
       ) : (
         <EmptyState
           icon="check"
