@@ -635,6 +635,26 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 		}
 		return map[string]any{"valid": true, "payload": p}, nil
 	}))
+	// signed audit checkpoints and receipts
+	mux.HandleFunc("GET /api/v1/audit/checkpoint", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		rec, payload, err := s.svc.AuditCheckpoint(r.Context())
+		return map[string]any{"record": rec, "payload": payload}, err
+	}))
+	mux.HandleFunc("GET /api/v1/events/{event}/audit/receipt", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		rec, payload, err := s.svc.AuditReceipt(r.Context(), actorOf(r), r.PathValue("event"))
+		return map[string]any{"record": rec, "payload": payload}, err
+	}))
+	mux.HandleFunc("POST /api/v1/audit/verify", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		// Re-walks the whole chain, so it is rate-limited like other public writes.
+		if err := s.limit(w, r, "audit-verify", 30, time.Minute); err != nil {
+			return nil, err
+		}
+		var rec core.SignedRecord
+		if err := decode(r, &rec, 1<<20); err != nil {
+			return nil, err
+		}
+		return s.svc.CheckAuditProof(r.Context(), rec)
+	}))
 	mux.HandleFunc("GET /.well-known/dogfood-signing-key", a(func(w http.ResponseWriter, r *http.Request) (any, error) {
 		k := s.svc.SigningKey()
 		return map[string]string{"alg": "Ed25519", "key_id": k.KeyID, "public_key": base64.StdEncoding.EncodeToString(k.Pub)}, nil

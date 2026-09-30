@@ -140,6 +140,15 @@ function EventQueue({ e, list }: { e: Event; list: Assignment[] }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`/api/v1/events/${e.slug}/audit/receipt`}
+              download={`audit-receipt-${e.slug}.json`}
+              title="A signed copy of your entries in the audit log. Keep it: if history is ever rewritten, this file proves it."
+              className={buttonClass("secondary", "sm")}
+            >
+              <Icon name="file" size={13} />
+              Audit receipt
+            </a>
             {e.results_published_at && (
               <Link
                 href={`/judge/${e.slug}/record`}

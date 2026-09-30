@@ -363,7 +363,7 @@ func SimulatePairModels(nProjects int, nu float64, budgets []int, trials int, se
 			d := FitDavidson(cs, ids)
 			res.DavidsonTau += KendallTau(d.Strength, truth)
 			res.NuMean += d.Nu
-			if math.Abs(d.Nu-nu) <= 1.645*d.NuSE {
+			if lo, hi := d.NuInterval(1.645); lo <= nu && nu <= hi {
 				res.NuCover++
 			}
 			res.EloTau += KendallTau(FitElo(cs, ids, 50, seed+uint64(t)).Rating, truth)

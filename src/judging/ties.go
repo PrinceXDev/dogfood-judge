@@ -220,3 +220,13 @@ func (f *DavidsonFit) Probs(a, b string) (win, loss, tie float64) {
 
 // EvenTieProb is the probability that two evenly matched projects tie.
 func (f *DavidsonFit) EvenTieProb() float64 { return f.Nu / (2 + f.Nu) }
+
+// NuInterval is a z-sigma interval for Nu, built on log nu (where the fit is
+// close to normal) and mapped back, so it never goes below zero.
+func (f *DavidsonFit) NuInterval(z float64) (lo, hi float64) {
+	if f.Nu <= 0 {
+		return 0, 0
+	}
+	s := f.NuSE / f.Nu
+	return f.Nu * math.Exp(-z*s), f.Nu * math.Exp(z*s)
+}

@@ -673,8 +673,22 @@ export default async function OrganizerResults({
         <Section
           eyebrow="Pairwise mode"
           title="Bradley–Terry strengths"
-          desc="Strength on the log-odds scale: a gap of 1.0 means the stronger project wins about 73% of comparisons."
+          desc="Strength on the log-odds scale: a gap of 1.0 means the stronger project wins about 73% of comparisons. Elo and the tie-aware rank are cross-checks on the same verdicts."
         >
+          {res.pairwise_ties && res.pairwise_ties.comparisons > 0 && (
+            <p className="mb-3 text-sm text-muted">
+              Judges called {res.pairwise_ties.ties} of{" "}
+              {res.pairwise_ties.comparisons} comparisons a tie. Two evenly
+              matched projects tie about {pct(res.pairwise_ties.even_tie_prob)}{" "}
+              of the time (ν = {f2(res.pairwise_ties.nu)} ±{" "}
+              {f2(res.pairwise_ties.nu_se)}). Modelling ties instead of halving
+              them{" "}
+              {res.pairwise_ties.rank_agreement > 0.95
+                ? "leaves the order essentially unchanged"
+                : "changes the order; compare the two rank columns"}{" "}
+              (Kendall τ {f2(res.pairwise_ties.rank_agreement)}).
+            </p>
+          )}
           <Table>
             <thead>
               <tr>
@@ -684,6 +698,8 @@ export default async function OrganizerResults({
                 <th className={num}>± SE</th>
                 <th className={num}>Comparisons</th>
                 <th className={num}>P(top {k})</th>
+                <th className={num}>Elo</th>
+                <th className={num}>Tie-aware #</th>
               </tr>
             </thead>
             <tbody>
@@ -699,6 +715,13 @@ export default async function OrganizerResults({
                       ? "·"
                       : pct(pairTopK(p.rank_dist) ?? 0)}
                   </td>
+                  <td
+                    className={num}
+                    title={`±${Math.round(p.elo_sd)} from verdict order alone`}
+                  >
+                    {Math.round(p.elo)}
+                  </td>
+                  <td className={num}>{p.davidson_rank}</td>
                 </tr>
               ))}
             </tbody>

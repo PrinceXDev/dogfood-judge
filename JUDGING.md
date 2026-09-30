@@ -446,7 +446,26 @@ $$\pi_i \leftarrow \frac{W_i + 1}{\sum_j \frac{n_{ij}}{\pi_i+\pi_j} + \frac{2}{\
   and never-compared projects finite, and connects a disconnected comparison
   graph.
 - **Ties** count as half a win each (the symmetric limit of Rao–Kupper), which
-  keeps MM monotone.
+  keeps MM monotone. The ranking uses this. Alongside it, the portal fits the
+  **Davidson (1970) tie model** to the same verdicts (`judging.FitDavidson`):
+  $P(\text{tie}) = \nu\sqrt{\pi_i\pi_j}\,/\,(\pi_i+\pi_j+\nu\sqrt{\pi_i\pi_j})$,
+  so two evenly matched projects tie with probability $\nu/(2+\nu)$. The
+  penalised log-likelihood is concave in $(\theta, \log\nu)$ and is solved by
+  damped Newton, with the same phantom prior plus one pseudo-tie and one
+  pseudo-decisive game between equal phantoms, so $\nu$ stays finite when
+  judges never (or always) say "tie". Results report $\nu$ with its SE (the
+  interval is built on $\log\nu$), and each project's tie-aware rank.
+  In simulation (`docs/simulation.md`, "Pairwise ties") the two rankings
+  are equally accurate, so the half-win ranking stays the default. What
+  Davidson adds is an honest tie rate and interval: $\hat\nu$ is unbiased and
+  its 90% interval covers the truth 90–94% of the time
+  (`TestDavidsonNuSEMatchesSpread`).
+- **Elo** is shown as a familiar cross-check: K = 32, base 1500, averaged over
+  200 random orders of the same verdicts (`judging.FitElo`). Plain Elo depends
+  on the order verdicts happened to arrive in; averaging removes that, and the
+  spread across orders is shown on hover. Elo's rank accuracy matches or
+  slightly trails Bradley–Terry in every simulated budget, which is why it
+  is not the ranking. 1.0 of strength ≈ 174 Elo points.
 - **Standard errors** come from the inverse of the full observed information
   matrix, with the phantom fixed at 0, so the matrix is invertible.
 - **Scores** are $\theta$ centred at 0. A gap of 1.0 means the stronger

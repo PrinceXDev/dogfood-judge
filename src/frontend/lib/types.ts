@@ -306,6 +306,20 @@ export interface PairwiseRow {
   comparisons: number;
   rank: number;
   rank_dist: number[] | null;
+  /** Elo averaged over random orders of the same comparisons. */
+  elo: number;
+  elo_sd: number;
+  /** Rank under the Davidson tie model. */
+  davidson_rank: number;
+}
+
+export interface PairwiseTies {
+  ties: number;
+  comparisons: number;
+  nu: number;
+  nu_se: number;
+  even_tie_prob: number;
+  rank_agreement: number;
 }
 
 export interface VoteTally {
@@ -320,6 +334,7 @@ export interface Results {
   rows: ResultRow[] | null;
   judges: JudgeRow[] | null;
   pairwise: PairwiseRow[] | null;
+  pairwise_ties?: PairwiseTies;
   votes?: VoteTally[] | null;
   excluded: Project[] | null;
   published: boolean;

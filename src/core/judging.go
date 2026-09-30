@@ -653,14 +653,16 @@ type JudgeRow struct {
 }
 
 type Results struct {
-	Event     *Event          `json:"event"`
-	Report    *judging.Report `json:"report"`
-	Rows      []ResultRow     `json:"rows"`
-	Judges    []JudgeRow      `json:"judges"`
-	Pairwise  []PairwiseRow   `json:"pairwise"`
-	Votes     []VoteTally     `json:"votes,omitempty"`
-	Excluded  []*Project      `json:"excluded"` // duplicates and disqualified, with reasons
-	Published bool            `json:"published"`
+	Event    *Event          `json:"event"`
+	Report   *judging.Report `json:"report"`
+	Rows     []ResultRow     `json:"rows"`
+	Judges   []JudgeRow      `json:"judges"`
+	Pairwise []PairwiseRow   `json:"pairwise"`
+	// PairwiseTies is the Davidson tie model fitted to the same comparisons.
+	PairwiseTies *PairwiseTies `json:"pairwise_ties,omitempty"`
+	Votes        []VoteTally   `json:"votes,omitempty"`
+	Excluded     []*Project    `json:"excluded"` // duplicates and disqualified, with reasons
+	Published    bool          `json:"published"`
 	// CriterionLeniency breaks judge leniency down by criterion; organizers only.
 	CriterionLeniency *judging.CriterionReport `json:"criterion_leniency,omitempty"`
 }
@@ -672,6 +674,20 @@ type PairwiseRow struct {
 	Comparisons int      `json:"comparisons"`
 	Rank        int      `json:"rank"`
 	RankDist    []int    `json:"rank_dist"` // bootstrap rank counts, as for scored results
+	// Cross-checks on the same comparisons; the ranking above stays half-win BT.
+	Elo          float64 `json:"elo"`           // mean over judging.EloOrderings random orders
+	EloSD        float64 `json:"elo_sd"`        // how much the order alone moves the rating
+	DavidsonRank int     `json:"davidson_rank"` // rank when ties are modelled, not halved
+}
+
+// PairwiseTies summarises how judges use "tie" (JUDGING.md §5).
+type PairwiseTies struct {
+	Ties          int     `json:"ties"`
+	Comparisons   int     `json:"comparisons"`
+	Nu            float64 `json:"nu"`
+	NuSE          float64 `json:"nu_se"`
+	EvenTieProb   float64 `json:"even_tie_prob"`  // P(tie) for two evenly matched projects
+	RankAgreement float64 `json:"rank_agreement"` // Kendall tau, Davidson vs half-win ranking
 }
 
 // PairwiseBootstrap is the replicate count behind PairwiseRow.RankDist.
@@ -767,7 +783,7 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 			res.Report.Robustness = &scrubbed
 		}
 	}
-	res.Pairwise, err = s.pairwiseRanking(ctx, e.ID, projects)
+	res.Pairwise, res.PairwiseTies, err = s.pairwiseRanking(ctx, e.ID, projects)
 	if err != nil {
 		return nil, err
 	}
@@ -1013,10 +1029,10 @@ func (s *Service) SubmitComparison(ctx context.Context, a Actor, eventID, projec
 	})
 }
 
-func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects map[string]*Project) ([]PairwiseRow, error) {
+func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects map[string]*Project) ([]PairwiseRow, *PairwiseTies, error) {
 	cs, err := s.comparisons(ctx, s.DB, eventID)
 	if err != nil || len(cs) == 0 {
-		return nil, err
+		return nil, nil, err
 	}
 	var live []judging.Comparison
 	for _, c := range cs {
@@ -1032,13 +1048,19 @@ func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects 
 	fit := judging.FitBT(live, ids)
 	ranks := judging.RankOf(fit.Strength)
 	dist := s.pairwiseDist(eventID, live, ids)
+	dv := judging.FitDavidson(live, ids)
+	dranks := judging.RankOf(dv.Strength)
+	elo := judging.FitElo(live, ids, judging.EloOrderings, seedFrom(eventID))
 	var out []PairwiseRow
 	for _, id := range ids {
 		out = append(out, PairwiseRow{Project: projects[id], Strength: fit.Strength[id], SE: fit.SE[id],
-			Comparisons: fit.Comparisons[id], Rank: ranks[id], RankDist: dist[id]})
+			Comparisons: fit.Comparisons[id], Rank: ranks[id], RankDist: dist[id],
+			Elo: elo.Rating[id], EloSD: elo.SD[id], DavidsonRank: dranks[id]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
-	return out, nil
+	ties := &PairwiseTies{Ties: dv.Ties, Comparisons: dv.Total, Nu: dv.Nu, NuSE: dv.NuSE,
+		EvenTieProb: dv.EvenTieProb(), RankAgreement: judging.KendallTau(dv.Strength, fit.Strength)}
+	return out, ties, nil
 }
 
 // pairwiseDist memoises judging.BTRankDist by a hash of its inputs, like analyze.

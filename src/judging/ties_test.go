@@ -2,6 +2,7 @@ package judging
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -70,7 +71,7 @@ func TestDavidsonEmptyAndAllTies(t *testing.T) {
 func TestEloIsOrderIndependentAndAgreesWithBT(t *testing.T) {
 	cs := []Comparison{
 		{A: "a", B: "b", Outcome: 1}, {A: "b", B: "c", Outcome: 1}, {A: "a", B: "c", Outcome: 1},
-		{A: "c", B: "d", Outcome: 0.5}, {A: "b", B: "d", Outcome: 1}, {A: "a", B: "d", Outcome: 1},
+		{A: "c", B: "d", Outcome: 1}, {A: "b", B: "d", Outcome: 0.5}, {A: "a", B: "d", Outcome: 1},
 	}
 	rev := make([]Comparison, len(cs))
 	for i := range cs {
@@ -92,5 +93,53 @@ func TestEloIsOrderIndependentAndAgreesWithBT(t *testing.T) {
 	}
 	if KendallTau(e1.Rating, FitBT(cs, nil).Strength) < 0.99 {
 		t.Fatalf("Elo order %v disagrees with BT", e1.Rating)
+	}
+}
+
+// The reported SE of log nu should match its actual spread across repeated events.
+func TestDavidsonNuSEMatchesSpread(t *testing.T) {
+	rng := rand.New(rand.NewPCG(5, 9))
+	ids := make([]string, 20)
+	for i := range ids {
+		ids[i] = string(rune('a' + i))
+	}
+	const nu, trials, budget = 0.8, 120, 480
+	var est, se []float64
+	for range trials {
+		truth := map[string]float64{}
+		for _, id := range ids {
+			truth[id] = 1.2 * rng.NormFloat64()
+		}
+		var cs []Comparison
+		for range budget {
+			a, b := ids[rng.IntN(20)], ids[rng.IntN(20)]
+			for b == a {
+				b = ids[rng.IntN(20)]
+			}
+			pa, pb := math.Exp(truth[a]), math.Exp(truth[b])
+			tie := nu * math.Sqrt(pa*pb)
+			u, o := rng.Float64()*(pa+pb+tie), 0.0
+			if u < pa {
+				o = 1
+			} else if u < pa+tie {
+				o = 0.5
+			}
+			cs = append(cs, Comparison{A: a, B: b, Outcome: o})
+		}
+		d := FitDavidson(cs, ids)
+		est = append(est, math.Log(d.Nu))
+		se = append(se, d.NuSE/d.Nu)
+	}
+	m, s2, mse := 0.0, 0.0, 0.0
+	for i := range est {
+		m += est[i] / trials
+		mse += se[i] / trials
+	}
+	for _, v := range est {
+		s2 += (v - m) * (v - m) / (trials - 1)
+	}
+	t.Logf("log nu: mean %.3f (truth %.3f), empirical SD %.3f, mean reported SE %.3f", m, math.Log(nu), math.Sqrt(s2), mse)
+	if r := math.Sqrt(s2) / mse; r < 0.8 || r > 1.25 {
+		t.Fatalf("reported SE is off by a factor %.2f", r)
 	}
 }

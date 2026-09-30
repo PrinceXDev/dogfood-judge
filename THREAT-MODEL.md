@@ -125,6 +125,15 @@ ballot stuffing by one account; the rest is about many accounts:
 - Sign-up cannot claim an imported judge's or participant's email (that
   would inherit their role); those people activate through a one-time link an
   organizer issues. *Test:* `TestSignupCannotClaimImportedAccount`.
+- An activation link sets a password, so it hands over the whole account.
+  An organizer can issue one only for someone whose every role is in events
+  that organizer runs, never for an admin, and never for an account that
+  already signs in with a password or a provider; a link issued earlier
+  stops working once the account is claimed another way. Without this, an
+  organizer of one event could take over a social-login judge, another
+  event's organizer, or an admin. *Tests:* `TestActivationLinkCannotTakeOverAccounts`,
+  `TestActivationLinkDiesOnceAccountIsClaimed`, and `TestOrganizerCannotReachAnotherEvent`
+  for cross-event access in general.
 - Sign-in providers (GitHub, Google, LinkedIn, X) are off unless the operator
   configures them. When on, an account is matched by the provider's stable
   user id, then by an email address the provider marks **verified**; an
@@ -153,6 +162,15 @@ ballot stuffing by one account; the rest is about many accounts:
   vote moderation are all logged in the same transaction as the change.
 - An operator who drops the triggers and edits a row breaks the chain from
   that row on, and the audit page says where. *Test:* `TestAuditChainDetectsTampering`.
+- An operator who also **recomputes every hash** gets a chain that re-walks
+  cleanly, so the chain alone cannot catch them. Signed statements held by
+  other people can: `GET /api/v1/audit/checkpoint` signs the chain head, and
+  `GET /api/v1/events/{event}/audit/receipt` signs the caller's own entries
+  (judges download it from their queue; only their own actions, never
+  anyone else's). Because each hash covers everything before it, one saved
+  receipt pins the whole history up to that point. `POST /api/v1/audit/verify`
+  or `dogfood verify-audit FILE` then reports the first entry whose hash no
+  longer matches. *Test:* `TestAuditReceiptCatchesRecomputedChain`.
 
 ### Forged certificates or judging records
 - Records are Ed25519-signed over their exact bytes; the public key is at
@@ -168,7 +186,7 @@ Honest list. Each is a known gap, not an oversight.
 | **Sybil voting from many networks with aged accounts** | Without email or phone verification (no external services by design), a patient attacker who creates accounts days before voting, from different IPs, looks like real voters. | Set `votes_per_voter` low, weight community vote lightly, review held votes. Email-domain allowlists would be the next feature. |
 | **Colluding judges who agree with each other** | If *every* reviewer of a project inflates it together, there is no honest review to disagree with, so no outlier appears. Outlier detection catches a lone favourite, not a unanimous conspiracy. | Assignment spreads co-reviews across many judge pairs, so a unanimous conspiracy needs every reviewer of that project. A tie-breaker round adds an independent reviewer where it matters. |
 | **A malicious organizer** | Organizers can move deadlines, re-weight rubrics and disqualify. | Every such action is in the tamper-evident log with old and new values; publishing the audit export makes it visible. The platform does not pretend organizers are untrusted. |
-| **Operator with database access** | Can rewrite rows and recompute the whole hash chain from scratch, before publication. | The signed results bundle anchors the published ranking to the audit hash at publication; anyone who saved it can detect a later rewrite. Before publication the operator is trusted. We do not anchor hashes externally, by design (offline). |
+| **Operator with database access** | Can rewrite rows and recompute the whole hash chain from scratch. They also hold the signing key, so they can sign new checkpoints for the rewritten chain. | They cannot make old receipts and checkpoints match: any rewrite of an entry someone holds a receipt for (or of anything before it) is detected when that receipt is checked. The signed results bundle anchors the published ranking the same way. History nobody holds a receipt for yet (the tail since the last receipt) is not protected, and we do not anchor hashes externally, by design (offline). |
 | **Shared-IP false positives** | A classroom behind one NAT trips the network rule. | Votes are held, never dropped; an organizer counts them in one click. |
 | **Rate-limit state is in memory** | Restarting the process resets buckets. | Acceptable for one process; a multi-instance deployment would need a shared store. |
 | **IP hashes are pseudonymous, not anonymous** | Keyed HMAC with a per-instance secret: not reversible without the database, but the operator could correlate. | Documented; no raw IPs are ever stored. |

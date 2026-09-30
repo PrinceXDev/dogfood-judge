@@ -65,6 +65,17 @@ Every trial draws true project quality, judge leniency, judge scale use and nois
 
 Variance-based selection does not match the live rule at every budget, so the live rule stays the default.
 
+## Pairwise ties: half a win vs the Davidson model vs Elo
+
+20 projects, random pairs, Davidson ground truth with nu = 0.8 (evenly matched projects tie 29% of the time). *Half-win* is the live ranking; *Davidson* models ties; *Elo* (K = 32) is averaged over random orders of the same verdicts. The last column is how often Davidson's 90% interval for nu covers the truth.
+
+| Comparisons | Ties | Half-win tau | Davidson tau | Elo tau | Mean nu | nu covered |
+|---:|---:|---:|---:|---:|---:|---:|
+| 60 | 24% | 0.511 | 0.512 | 0.510 | 0.81 | 94% |
+| 120 | 24% | 0.619 | 0.619 | 0.610 | 0.80 | 93% |
+| 240 | 24% | 0.731 | 0.730 | 0.727 | 0.80 | 91% |
+| 480 | 24% | 0.803 | 0.803 | 0.801 | 0.80 | 90% |
+
 ## Judge fatigue: drift check
 
 40 projects, 12 judges writing their reviews in random order. In every world one judge gives a constant score for their second half (flattening) and one triples their noise for it (erratic); the rest never change. Each check is a permutation test at 2.5% per tail.

@@ -111,25 +111,34 @@ func checkPasswordPolicy(password string) error {
 }
 
 // ActivationLink issues a one-time link for an account that has no password
-// yet (imported judges and team members). Organizers may issue links only for
-// people who hold a role in an event they organize.
+// yet (imported judges and team members). Setting a password hands over the
+// whole account, so an organizer may only do it for someone whose every role
+// is in events that organizer runs, who is not an admin, and who has never
+// signed in another way. Admins may issue links for any non-admin.
 func (s *Service) ActivationLink(ctx context.Context, a Actor, eventID, userID string) (string, error) {
 	if err := s.require(ctx, s.DB, a, eventID, RoleOrganizer); err != nil {
 		return "", err
 	}
-	var hasPassword bool
-	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT password_hash IS NOT NULL,
-		(SELECT count(*) FROM event_roles WHERE event_id = ? AND user_id = users.id AND role IN ('judge', 'participant'))
-		FROM users WHERE id = ?`, eventID, userID).Scan(&hasPassword, &n)
+	var claimed, isAdmin bool
+	var n, outside int
+	err := s.DB.QueryRowContext(ctx, `SELECT
+		password_hash IS NOT NULL OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = users.id),
+		is_admin,
+		(SELECT count(*) FROM event_roles WHERE event_id = ? AND user_id = users.id AND role IN ('judge', 'participant')),
+		(SELECT count(*) FROM event_roles r WHERE r.user_id = users.id AND r.event_id NOT IN
+			(SELECT event_id FROM event_roles WHERE user_id = ? AND role = 'organizer'))
+		FROM users WHERE id = ?`, eventID, a.User.ID, userID).Scan(&claimed, &isAdmin, &n, &outside)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && n == 0) {
 		return "", errNotFound("judge or participant")
 	}
 	if err != nil {
 		return "", err
 	}
-	if hasPassword {
-		return "", errConflict("already_active", "this account already has a password")
+	if isAdmin || (outside > 0 && !a.User.IsAdmin) {
+		return "", errForbidden("this person also holds roles outside your events; ask an admin to issue their link")
+	}
+	if claimed {
+		return "", errConflict("already_active", "this account already signs in with a password or an identity provider")
 	}
 	token, err := s.issueCredential(ctx, userID, "activation", "", s.now().Add(7*24*time.Hour))
 	if err != nil {
@@ -172,6 +181,16 @@ func (s *Service) Activate(ctx context.Context, a Actor, token, password string)
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return errNotFound("activation link")
+		}
+		// A link minted while the account was unclaimed must not become a
+		// second key once the owner has signed in another way.
+		var claimed bool
+		if err := tx.QueryRowContext(ctx, `SELECT password_hash IS NOT NULL OR EXISTS
+			(SELECT 1 FROM user_identities WHERE user_id = users.id) FROM users WHERE id = ?`, u.ID).Scan(&claimed); err != nil {
+			return err
+		}
+		if claimed {
+			return errConflict("already_active", "this account is already active; sign in instead")
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, u.ID); err != nil {
 			return err
