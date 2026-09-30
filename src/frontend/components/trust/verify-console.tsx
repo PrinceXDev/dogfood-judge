@@ -4,6 +4,7 @@ import { type ReactNode, useActionState, useState } from "react";
 import { type Proof, verifyProof } from "@/app/verify/actions";
 import { buttonClass } from "@/components/button";
 import { Icon } from "@/components/icons";
+import { ReviewProof } from "@/components/trust/review-proof";
 import {
   fingerprint,
   recordId,
@@ -275,6 +276,13 @@ function Valid({ proof }: { proof: ValidProof }) {
           <span className="font-mono text-xs">{p.key_id}</span>
         </Row>
       </dl>
+      {judge && !!p.review_leaves?.length && (
+        <ReviewProof
+          eventId={p.event_id}
+          leaves={p.review_leaves}
+          pseudonym={p.pseudonym}
+        />
+      )}
       <div className="flex items-center gap-4 border-t border-line bg-surface-2/60 px-5 py-4">
         <SignatureGlyph
           signature={proof.signature}

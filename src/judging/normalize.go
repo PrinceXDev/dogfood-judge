@@ -416,6 +416,9 @@ type Report struct {
 	Reviews    int                `json:"reviews"`
 	Robustness *Robustness        `json:"robustness,omitempty"`
 	Outliers   []*OutlierReview   `json:"outliers"`
+	// Convergence is the review-count learning curve: how much the top of the
+	// ranking moves when each project loses some of its reviews.
+	Convergence *Convergence `json:"convergence,omitempty"`
 }
 
 type FitSummary struct {
@@ -485,6 +488,7 @@ func Analyze(reviews []Review, wantReviews int, opt Options) *Report {
 	rep.Components = Components(reviews)
 	bootstrap(rep, reviews, full, opt)
 	robustness(rep, reviews, full, opt)
+	convergence(rep, reviews, full, opt)
 	return rep
 }
 

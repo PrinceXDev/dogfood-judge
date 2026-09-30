@@ -653,14 +653,18 @@ type JudgeRow struct {
 }
 
 type Results struct {
-	Event     *Event          `json:"event"`
-	Report    *judging.Report `json:"report"`
-	Rows      []ResultRow     `json:"rows"`
-	Judges    []JudgeRow      `json:"judges"`
-	Pairwise  []PairwiseRow   `json:"pairwise"`
-	Votes     []VoteTally     `json:"votes,omitempty"`
-	Excluded  []*Project      `json:"excluded"` // duplicates and disqualified, with reasons
-	Published bool            `json:"published"`
+	Event    *Event          `json:"event"`
+	Report   *judging.Report `json:"report"`
+	Rows     []ResultRow     `json:"rows"`
+	Judges   []JudgeRow      `json:"judges"`
+	Pairwise []PairwiseRow   `json:"pairwise"`
+	// PairwiseTies is the Davidson tie model fitted to the same comparisons.
+	PairwiseTies *PairwiseTies `json:"pairwise_ties,omitempty"`
+	Votes        []VoteTally   `json:"votes,omitempty"`
+	Excluded     []*Project    `json:"excluded"` // duplicates and disqualified, with reasons
+	Published    bool          `json:"published"`
+	// CriterionLeniency breaks judge leniency down by criterion; organizers only.
+	CriterionLeniency *judging.CriterionReport `json:"criterion_leniency,omitempty"`
 }
 
 type PairwiseRow struct {
@@ -670,6 +674,20 @@ type PairwiseRow struct {
 	Comparisons int      `json:"comparisons"`
 	Rank        int      `json:"rank"`
 	RankDist    []int    `json:"rank_dist"` // bootstrap rank counts, as for scored results
+	// Cross-checks on the same comparisons; the ranking above stays half-win BT.
+	Elo          float64 `json:"elo"`           // mean over judging.EloOrderings random orders
+	EloSD        float64 `json:"elo_sd"`        // how much the order alone moves the rating
+	DavidsonRank int     `json:"davidson_rank"` // rank when ties are modelled, not halved
+}
+
+// PairwiseTies summarises how judges use "tie" (JUDGING.md §5).
+type PairwiseTies struct {
+	Ties          int     `json:"ties"`
+	Comparisons   int     `json:"comparisons"`
+	Nu            float64 `json:"nu"`
+	NuSE          float64 `json:"nu_se"`
+	EvenTieProb   float64 `json:"even_tie_prob"`  // P(tie) for two evenly matched projects
+	RankAgreement float64 `json:"rank_agreement"` // Kendall tau, Davidson vs half-win ranking
 }
 
 // PairwiseBootstrap is the replicate count behind PairwiseRow.RankDist.
@@ -727,6 +745,13 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 	}
 	writeOrder(input, all)
 	res.Report = s.analyze(e, input, bootstrap)
+	if c := res.Report.Convergence; c != nil {
+		if ordered, ok := arrivalOrder(input, all); ok {
+			cp := *c // the report is a shallow copy of the cache: copy before editing
+			cp.Arrival = judging.ArrivalCurve(ordered, &cp, judging.Options{Seed: seedFrom(e.ID)})
+			res.Report.Convergence = &cp
+		}
+	}
 	ranked := map[string]bool{}
 	for _, pr := range res.Report.Projects {
 		ranked[pr.Project] = true
@@ -749,6 +774,7 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 		for _, j := range res.Report.Judges {
 			res.Judges = append(res.Judges, JudgeRow{Name: names[j.Judge], JudgeResult: j})
 		}
+		res.CriterionLeniency = criterionLeniency(e, all, projects)
 	} else {
 		res.Report.Judges = nil // judge diagnostics are for organizers only
 		if rb := res.Report.Robustness; rb != nil {
@@ -757,7 +783,7 @@ func (s *Service) Results(ctx context.Context, a Actor, eventID string, bootstra
 			res.Report.Robustness = &scrubbed
 		}
 	}
-	res.Pairwise, err = s.pairwiseRanking(ctx, e.ID, projects)
+	res.Pairwise, res.PairwiseTies, err = s.pairwiseRanking(ctx, e.ID, projects)
 	if err != nil {
 		return nil, err
 	}
@@ -1003,10 +1029,10 @@ func (s *Service) SubmitComparison(ctx context.Context, a Actor, eventID, projec
 	})
 }
 
-func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects map[string]*Project) ([]PairwiseRow, error) {
+func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects map[string]*Project) ([]PairwiseRow, *PairwiseTies, error) {
 	cs, err := s.comparisons(ctx, s.DB, eventID)
 	if err != nil || len(cs) == 0 {
-		return nil, err
+		return nil, nil, err
 	}
 	var live []judging.Comparison
 	for _, c := range cs {
@@ -1022,13 +1048,19 @@ func (s *Service) pairwiseRanking(ctx context.Context, eventID string, projects 
 	fit := judging.FitBT(live, ids)
 	ranks := judging.RankOf(fit.Strength)
 	dist := s.pairwiseDist(eventID, live, ids)
+	dv := judging.FitDavidson(live, ids)
+	dranks := judging.RankOf(dv.Strength)
+	elo := judging.FitElo(live, ids, judging.EloOrderings, seedFrom(eventID))
 	var out []PairwiseRow
 	for _, id := range ids {
 		out = append(out, PairwiseRow{Project: projects[id], Strength: fit.Strength[id], SE: fit.SE[id],
-			Comparisons: fit.Comparisons[id], Rank: ranks[id], RankDist: dist[id]})
+			Comparisons: fit.Comparisons[id], Rank: ranks[id], RankDist: dist[id],
+			Elo: elo.Rating[id], EloSD: elo.SD[id], DavidsonRank: dranks[id]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
-	return out, nil
+	ties := &PairwiseTies{Ties: dv.Ties, Comparisons: dv.Total, Nu: dv.Nu, NuSE: dv.NuSE,
+		EvenTieProb: dv.EvenTieProb(), RankAgreement: judging.KendallTau(dv.Strength, fit.Strength)}
+	return out, ties, nil
 }
 
 // pairwiseDist memoises judging.BTRankDist by a hash of its inputs, like analyze.
@@ -1080,6 +1112,58 @@ func writeOrder(input []judging.Review, all []*Review) {
 			input[i].Seq = n + 1
 		}
 	}
+}
+
+// arrivalOrder sorts the reviews by when they were first written. Imported
+// scores share one timestamp, so their order is unknowable: when more than a
+// tenth of reviews share a second with another, ok is false and no arrival
+// curve is drawn rather than one built on an arbitrary order.
+func arrivalOrder(input []judging.Review, all []*Review) ([]judging.Review, bool) {
+	created := map[[2]string]time.Time{}
+	for _, r := range all {
+		created[[2]string{r.JudgeID, r.ProjectID}] = r.CreatedAt
+	}
+	ordered := append([]judging.Review(nil), input...)
+	sort.SliceStable(ordered, func(a, b int) bool {
+		x, y := created[[2]string{ordered[a].Judge, ordered[a].Project}], created[[2]string{ordered[b].Judge, ordered[b].Project}]
+		if !x.Equal(y) {
+			return x.Before(y)
+		}
+		if ordered[a].Project != ordered[b].Project {
+			return ordered[a].Project < ordered[b].Project
+		}
+		return ordered[a].Judge < ordered[b].Judge
+	})
+	perSecond := map[int64]int{}
+	for _, r := range ordered {
+		perSecond[created[[2]string{r.Judge, r.Project}].Unix()]++
+	}
+	tied := 0
+	for _, n := range perSecond {
+		if n > 1 {
+			tied += n
+		}
+	}
+	return ordered, len(ordered) >= 4 && tied*10 <= len(ordered)
+}
+
+// criterionLeniency feeds every criterion value of the ranked projects'
+// reviews to the per-criterion leniency estimate, in rubric order.
+func criterionLeniency(e *Event, all []*Review, projects map[string]*Project) *judging.CriterionReport {
+	var keys []string
+	for _, c := range e.Criteria {
+		keys = append(keys, c.Key)
+	}
+	var scores []judging.CriterionScore
+	for _, r := range all {
+		if projects[r.ProjectID] == nil {
+			continue
+		}
+		for k, v := range r.Scores {
+			scores = append(scores, judging.CriterionScore{Judge: r.JudgeID, Project: r.ProjectID, Criterion: k, Value: float64(v)})
+		}
+	}
+	return judging.CriterionLeniency(scores, keys)
 }
 
 // analyze memoises judging.Analyze by a hash of its exact inputs, so the

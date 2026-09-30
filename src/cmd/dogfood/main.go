@@ -5,6 +5,7 @@
 //	dogfood simulate [fixtures.json]   Monte Carlo validation of every method
 //	dogfood verify-record FILE --key B64
 //	dogfood verify-results BUNDLE --key B64  reproduce a published ranking offline
+//	dogfood verify-audit RECEIPT        check a saved audit receipt or checkpoint against DOGFOOD_DB
 //	dogfood export EVENT > event.json  /  dogfood import event.json
 //	dogfood set-password EMAIL
 package main
@@ -71,6 +72,8 @@ func main() {
 		err = verifyResults(args)
 	case "verify-review":
 		err = verifyReview(args)
+	case "verify-audit":
+		err = verifyAudit(args)
 	case "export":
 		err = export(args)
 	case "import":
@@ -80,7 +83,7 @@ func main() {
 	case "backup":
 		err = backup(args)
 	case "help", "-h", "--help":
-		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|verify-results|verify-review|export|import|set-password|backup]")
+		fmt.Println("usage: dogfood [serve|normalize|simulate|verify-record|verify-results|verify-review|verify-audit|export|import|set-password|backup]")
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
@@ -328,11 +331,53 @@ func simulate(args []string) error {
 	} else {
 		fmt.Fprintf(w, "\nVariance-based selection does not match the live rule at every budget, so the live rule stays the default.\n")
 	}
+	fmt.Fprintf(w, "\n## Pairwise ties: half a win vs the Davidson model vs Elo\n\n20 projects, random pairs, Davidson ground truth with nu = 0.8 (evenly matched projects tie 29%% of the time). *Half-win* is the live ranking; *Davidson* models ties; *Elo* (K = %.0f) is averaged over random orders of the same verdicts. The last column is how often Davidson's 90%% interval for nu covers the truth.\n\n| Comparisons | Ties | Half-win tau | Davidson tau | Elo tau | Mean nu | nu covered |\n|---:|---:|---:|---:|---:|---:|---:|\n", judging.EloK)
+	for _, r := range judging.SimulatePairModels(20, 0.8, []int{60, 120, 240, 480}, max(*trials/5, 40), 29) {
+		fmt.Fprintf(w, "| %d | %.0f%% | %.3f | %.3f | %.3f | %.2f | %.0f%% |\n", r.Budget, 100*r.TieShare, r.BTTau, r.DavidsonTau, r.EloTau, r.NuMean, 100*r.NuCover)
+	}
 	fmt.Fprintf(w, "\n## Judge fatigue: drift check\n\n40 projects, 12 judges writing their reviews in random order. In every world one judge gives a constant score for their second half (flattening) and one triples their noise for it (erratic); the rest never change. Each check is a permutation test at %.1f%% per tail.\n\n| Reviews per judge | Honest judges | False flags | Flattening caught | Erratic caught |\n|---:|---:|---:|---:|---:|\n", 100*judging.DriftAlpha)
 	for _, n := range []int{8, 10, 16, 24} {
 		r := judging.SimulateDrift(n, max(*trials/5, 40), 23)
 		fmt.Fprintf(w, "| %d | %d | %.1f%% | %.0f%% | %.0f%% |\n", n, r.Judges, 100*r.FalseFlagRate, 100*r.FlattenCaught, 100*r.ErraticCaught)
 	}
+	return nil
+}
+
+// verifyAudit holds a saved receipt or checkpoint up against a database copy.
+func verifyAudit(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: DOGFOOD_DB=path dogfood verify-audit receipt.json")
+	}
+	b, err := os.ReadFile(args[0])
+	if err != nil {
+		return err
+	}
+	var rec core.SignedRecord
+	json.Unmarshal(b, &rec)
+	if rec.Payload == "" { // the API response shape {"record": {...}}
+		var wrapped struct{ Record core.SignedRecord }
+		json.Unmarshal(b, &wrapped)
+		rec = wrapped.Record
+	}
+	if rec.Payload == "" {
+		return errors.New("file is not a signed audit receipt or checkpoint")
+	}
+	ctx := context.Background()
+	svc, err := openService(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := svc.CheckAuditProof(ctx, rec)
+	if err != nil {
+		return err
+	}
+	if !res.Valid {
+		for _, m := range res.Mismatches {
+			fmt.Printf("entry %d: signed hash %s, database has %q\n", m.Seq, m.Want, m.Got)
+		}
+		return fmt.Errorf("FAILED: %s", res.Reason)
+	}
+	fmt.Printf("VERIFIED: %d pinned entries match, chain intact (%d entries)\n", res.Checked, res.Chain.Entries)
 	return nil
 }
 

@@ -44,6 +44,15 @@ cd src/frontend && npm install && API_URL=http://127.0.0.1:8080 npm run dev -- -
   (pseudonymized inputs, input fingerprint, audit anchor, ranking).
   `dogfood verify-results` re-runs the engine offline and must get the same
   answer (§7).
+- **Answers "do we have enough reviews?"** A learning curve refits the model
+  with part of every project's reviews removed. "Settled" was right in every
+  simulated event where it was claimed (JUDGING.md §3.12).
+- **Shows leniency per criterion without inventing it.** A judge × criterion
+  grid, shrunk by empirical Bayes, colours only offsets whose 90% interval
+  clears zero (§3.11).
+- **Lets a judge prove their own reviews in the browser.** Paste the signed
+  record on `/verify`: the page checks the signature and every review's
+  Merkle path locally, with no CLI and no trust in the portal (§7.1).
 - **Normalizes honestly.** A leniency-and-scale model with empirical-Bayes
   shrinkage and bootstrap rank intervals, validated by 5,000 simulated events
   on the fixture's own review graph, including the scenario where it loses.

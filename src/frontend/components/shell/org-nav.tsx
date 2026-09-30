@@ -49,7 +49,7 @@ export function OrgNav({ slug }: { slug: string }) {
     <>
       <nav
         aria-label="Organizer"
-        className="sticky top-20 hidden w-52 shrink-0 self-start lg:block"
+        className="no-print sticky top-20 hidden w-52 shrink-0 self-start lg:block"
       >
         {GROUPS.map(([group, entries]) => (
           <div key={group} className="mb-6">
@@ -82,7 +82,7 @@ export function OrgNav({ slug }: { slug: string }) {
       </nav>
       <nav
         aria-label="Organizer"
-        className="-mx-4 mb-6 flex gap-1 overflow-x-auto border-b border-line px-4 lg:hidden"
+        className="no-print -mx-4 mb-6 flex gap-1 overflow-x-auto border-b border-line px-4 lg:hidden"
       >
         {primary.map((e) => {
           const on = active(e);

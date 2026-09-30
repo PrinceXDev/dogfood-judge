@@ -591,6 +591,25 @@ paths:
       summary: Verify a record against this portal's key.
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/SignedRecord" } } } }
       responses: { "200": { description: Verdict, content: { application/json: { schema: { type: object, properties: { valid: { type: boolean }, payload: { type: object }, reason: { type: string } } } } } } }
+  /audit/checkpoint:
+    get:
+      tags: [records]
+      security: []
+      summary: The audit chain's latest entry (seq and hash), signed by this instance. Keep it to detect a later rewrite of history. See THREAT-MODEL.md.
+      responses: { "200": { description: "{record: SignedRecord, payload}", content: { application/json: { schema: { type: object, properties: { record: { $ref: "#/components/schemas/SignedRecord" }, payload: { type: object } } } } } } }
+  /events/{event}/audit/receipt:
+    get:
+      tags: [records]
+      summary: A signed receipt pinning the caller's own audit entries in this event, plus the chain head. Any role in the event; never another person's entries.
+      parameters: [{ $ref: "#/components/parameters/Event" }]
+      responses: { "200": { description: "{record: SignedRecord, payload}" }, "401": { description: Not signed in }, "403": { description: No role in this event } }
+  /audit/verify:
+    post:
+      tags: [records]
+      security: []
+      summary: Check a saved checkpoint or receipt against the live audit log. Fails if the signature is wrong, any pinned hash changed, or the chain is broken. Rate-limited (30/min).
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/SignedRecord" } } } }
+      responses: { "200": { description: "Verdict: {valid, reason, checked, mismatches: [{seq, want, got}], chain}" }, "429": { description: Rate limited } }
 
   /stats:
     get:
@@ -831,6 +850,64 @@ components:
               type: object
               properties:
                 refit_top_k: { type: object, additionalProperties: { type: array, items: { type: string } }, description: "Organizers only: the top k of each leave-one-judge-out refit, keyed by the removed judge." }
+            convergence:
+              type: object
+              description: "Review-count learning curve: each project keeps a random fraction of its reviews and the model is refitted. See JUDGING.md."
+              properties:
+                top_n: { type: integer }
+                top_k: { type: integer }
+                subsamples: { type: integer }
+                settled: { type: boolean, description: "With 20% of reviews removed, top-N tau >= 0.9 and the top-k set is unchanged in >= 80% of refits." }
+                verdict: { type: string }
+                curve:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fraction: { type: number }
+                      reviews: { type: number }
+                      per_project: { type: number }
+                      tau_mean: { type: number }
+                      tau_low: { type: number }
+                      tau_high: { type: number }
+                      top_k_same: { type: number }
+                      winner_same: { type: number }
+                arrival:
+                  type: array
+                  description: "The real trajectory in write order; absent when write times can't order the reviews (e.g. imported scores)."
+                  items:
+                    type: object
+                    properties:
+                      reviews: { type: integer }
+                      tau: { type: number }
+                      top_k_same: { type: boolean }
+        criterion_leniency:
+          type: object
+          description: "Organizers only: each judge's offset per criterion vs co-judges on the same projects, shrunk by empirical Bayes, with a 90% interval."
+          properties:
+            criteria:
+              type: array
+              items:
+                type: object
+                properties:
+                  criterion: { type: string }
+                  tau: { type: number }
+                  sigma: { type: number }
+                  flagged: { type: integer }
+            cells:
+              type: array
+              items:
+                type: object
+                properties:
+                  judge: { type: string }
+                  criterion: { type: string }
+                  reviews: { type: integer }
+                  raw: { type: number }
+                  lambda: { type: number }
+                  shrunk: { type: number }
+                  low: { type: number }
+                  high: { type: number }
+                  signal: { type: string, enum: [lenient, harsh, noise, low data] }
         rows:
           type: array
           items:
@@ -868,6 +945,19 @@ components:
             type: object
             properties:
               rank_dist: { type: array, items: { type: integer }, description: Bootstrap rank counts over resampled comparisons. }
+              elo: { type: number, description: "Elo (K = 32, base 1500) averaged over 200 random orders of the comparisons; a cross-check, not the ranking." }
+              elo_sd: { type: number, description: How far the order of the verdicts alone moves the Elo rating. }
+              davidson_rank: { type: integer, description: Rank when ties are modelled (Davidson 1970) instead of counted as half a win. }
+        pairwise_ties:
+          type: object
+          description: Davidson tie model fitted to the pairwise comparisons. See JUDGING.md §5.
+          properties:
+            ties: { type: integer }
+            comparisons: { type: integer }
+            nu: { type: number, description: Tie propensity. }
+            nu_se: { type: number }
+            even_tie_prob: { type: number, description: "P(tie) for two evenly matched projects, nu / (2 + nu)." }
+            rank_agreement: { type: number, description: Kendall tau between the Davidson and half-win rankings. }
         votes: { type: array }
         excluded: { type: array, items: { $ref: "#/components/schemas/Project" } }
     SignedRecord:

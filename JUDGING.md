@@ -318,6 +318,72 @@ outlier, and it is shown with its price in ranks.
 On the fixture no review crosses 2.5σ. The fixture's scores are noisy but
 not adversarial, and the report says so rather than inventing suspects.
 
+### 3.11 Leniency by criterion
+
+The model corrects each judge's *composite* score. Organizers also ask a
+finer question: "is this judge harsh on innovation only?" For each criterion
+$c$, every value is compared with the mean of the **other** judges who scored
+the same project on the same criterion, so project quality cancels out:
+
+$$d_{jpc} = x_{jpc} - \bar x_{-j,pc}, \qquad \bar d_{jc} = \text{mean}_p\, d_{jpc}$$
+
+$\bar d_{jc}$ is the judge's raw offset on that criterion, with sampling
+variance $SE^2 = s_c^2 / n_{jc}$ ($s_c^2$ pooled within judges). The real
+spread of leniency on the criterion, $\tau_c^2$, is estimated by the method
+of moments, $\hat\tau_c^2 = \max(0,\ \text{Var}_j(\bar d_{jc}) - \overline{SE^2})$,
+and each offset is shrunk by empirical Bayes:
+
+$$\lambda_{jc} = \frac{\hat\tau_c^2}{\hat\tau_c^2 + SE^2}, \qquad \text{shrunk} = \lambda_{jc}\,\bar d_{jc}, \qquad 90\%\ \text{interval} = \text{shrunk} \pm 1.645\sqrt{\lambda_{jc}}\,SE$$
+
+This is the fixed rule $\lambda = n/(n+5)$ with the 5 replaced by
+$s_c^2/\hat\tau_c^2$, estimated from the event instead of assumed. The
+organizer's results page draws a judge × criterion grid in which a cell is
+coloured only when its interval clears zero; cells with fewer than 3
+co-judged values say so instead of showing a number. A colour grid that
+tinted every cell would invite reading patterns into noise.
+
+On the fixture, **none** of the 90 cells clears zero: with 2–11 reviews per
+judge a single criterion can't separate from noise (innovation's $\hat\tau$
+is 0, so every innovation offset shrinks to zero). The composite model
+(§3.2), which pools the criteria, has the power the per-criterion view lacks,
+and the page says so. `TestCriterionLeniencyFindsPlantedOffset` plants one
+judge who is 1.2 points harsh on one criterion and checks it is flagged with
+at most 3 false flags among the other 29 cells;
+`TestCriterionLeniencyShrinksNoise` checks that with no real differences the
+offsets shrink toward zero and almost nothing is flagged.
+
+### 3.12 Do we have enough reviews? The learning curve
+
+"Is the ranking still moving?" is usually answered by watching it change as
+reviews arrive. That needs write times, and imported scores (like the
+fixture's) all share one, so their order is unknowable. The engine answers
+with a learning curve instead, which needs no timestamps:
+
+1. For each fraction $f \in \{0.3, 0.4, \dots, 0.9\}$, every project keeps
+   a random $f$ of its reviews (at least one; counts are rounded at random so
+   the expected share is exactly $f$), and the model is refitted, 40 times.
+2. Each refit is compared with the full-data fit: Kendall's $\tau$ over the
+   full top 10, whether the top-$k$ set is the same, whether the winner is.
+3. **Settled** means that with 20% of reviews removed, the top-10 $\tau$
+   averages at least 0.9 **and** the top-$k$ set survives at least 80% of
+   refits.
+
+The argument: an extra review shrinks the error by less than removing one
+grows it, so if dropping a fifth of the reviews barely moves the top, adding
+a fifth more will move it less. That is a heuristic, so it is checked by
+simulation (`TestConvergenceVerdictIsCalibrated`, docs/simulation.md): across
+48 synthetic events with 2, 4 or 8 reviews per project and low or high noise,
+every "settled" top 3 matched the planted top 3 (6 of 6); "still moving" ones
+did 43% of the time. The verdict is conservative: it rarely says settled,
+and when it does it has been right.
+
+When write times can order the reviews (no more than a tenth share a second
+with another), the results page also plots the real trajectory: the fit
+after the first reviews at about a dozen checkpoints, compared with the
+final fit. On the fixture the verdict is *still moving*: dropping a fifth of
+the reviews changes the top 3 in most refits, which is what 3 reviews per
+project should look like, and agrees with the prize-boundary warning (§1.1).
+
 ---
 
 ## 4. Does it work? Monte Carlo validation
@@ -380,7 +446,26 @@ $$\pi_i \leftarrow \frac{W_i + 1}{\sum_j \frac{n_{ij}}{\pi_i+\pi_j} + \frac{2}{\
   and never-compared projects finite, and connects a disconnected comparison
   graph.
 - **Ties** count as half a win each (the symmetric limit of Rao–Kupper), which
-  keeps MM monotone.
+  keeps MM monotone. The ranking uses this. Alongside it, the portal fits the
+  **Davidson (1970) tie model** to the same verdicts (`judging.FitDavidson`):
+  $P(\text{tie}) = \nu\sqrt{\pi_i\pi_j}\,/\,(\pi_i+\pi_j+\nu\sqrt{\pi_i\pi_j})$,
+  so two evenly matched projects tie with probability $\nu/(2+\nu)$. The
+  penalised log-likelihood is concave in $(\theta, \log\nu)$ and is solved by
+  damped Newton, with the same phantom prior plus one pseudo-tie and one
+  pseudo-decisive game between equal phantoms, so $\nu$ stays finite when
+  judges never (or always) say "tie". Results report $\nu$ with its SE (the
+  interval is built on $\log\nu$), and each project's tie-aware rank.
+  In simulation (`docs/simulation.md`, "Pairwise ties") the two rankings
+  are equally accurate, so the half-win ranking stays the default. What
+  Davidson adds is an honest tie rate and interval: $\hat\nu$ is unbiased and
+  its 90% interval covers the truth 90–94% of the time
+  (`TestDavidsonNuSEMatchesSpread`).
+- **Elo** is shown as a familiar cross-check: K = 32, base 1500, averaged over
+  200 random orders of the same verdicts (`judging.FitElo`). Plain Elo depends
+  on the order verdicts happened to arrive in; averaging removes that, and the
+  spread across orders is shown on hover. Elo's rank accuracy matches or
+  slightly trails Bradley–Terry in every simulated budget, which is why it
+  is not the ranking. 1.0 of strength ≈ 174 Elo points.
 - **Standard errors** come from the inverse of the full observed information
   matrix, with the phantom fixed at 0, so the matrix is invertible.
 - **Scores** are $\theta$ centred at 0. A gap of 1.0 means the stronger
@@ -568,6 +653,17 @@ has no leaf to find. `TestVerifiableResultsBundle` covers a genuine record
 and an edited review; `TestMerkleInclusionProofs` checks every leaf of trees
 of 1 to 17 leaves and rejects wrong indices and roots.
 
+The same check runs **in the browser**. Pasting a judge record on `/verify`
+offers "Check inclusion": the page downloads the public bundle and signing
+key, checks the manifest's Ed25519 signature with Web Crypto (browsers
+without Ed25519 are told to use the CLI), recomputes every leaf and the root
+locally, and proves each of the judge's reviews with its audit path. The
+portal only supplies files it has already signed, so it can't vouch for
+itself. `src/frontend/lib/merkle.ts` reproduces Go's hashing byte for byte,
+including `encoding/json`'s key sorting and HTML escaping; a shared test
+vector is asserted by both `tests/merkle_vector_test.go` and
+`lib/merkle.test.ts`, so the two can't drift apart.
+
 This proves inclusion and integrity after publication. It does not prove that
 a judge scored honestly, or that the portal recorded what the judge typed
 before publication: for that the judge would need to have kept their own copy.
@@ -590,3 +686,8 @@ manifest's anchor ties the two together.
   not uncertainty about who was assigned.
 - With 2–3 reviews per project, **no** method produces a confident total
   order of 40 projects. The portal's job is to say so, and it does.
+- The learning-curve verdict (§3.12) is a heuristic backed by simulation,
+  not a theorem. It is deliberately conservative.
+- Per-criterion leniency (§3.11) needs several co-judged reviews per judge
+  to say anything; at hackathon scale it mostly confirms that criterion-level
+  differences are within noise.

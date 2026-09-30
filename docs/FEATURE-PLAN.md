@@ -306,3 +306,24 @@ too few for statistical fatigue detection.
 - `npm run check`, `npm run build`, `go test ./...`, `run.py` and
   `tools/extended_check.py` all pass.
 - Math changes are documented in `JUDGING.md`.
+
+---
+
+## Research review, 29 Sep 2026
+
+A second list of ideas (leniency heatmap, rank posteriors, Merkle CLI,
+information-gain pairs, COI graph, fatigue, PDF playbook, convergence
+dashboard, OAuth) was checked against the code after the seven features
+above shipped. Most already existed; this is what changed.
+
+| Idea | Status |
+|------|--------|
+| Leniency heatmap with EB intervals | Judge-level forest plot existed. **Added** a judge × criterion grid with estimated EB shrinkage (JUDGING.md §3.11). |
+| Live P(top 1/3/10) | Existed: rank distributions, cut-off slider, 5 s polling. WebSocket not needed at this scale. |
+| Merkle proof per review | CLI existed. **Added** the same check in the browser on `/verify`. |
+| Information-gain pair selection | Tested in the simulation and lost at 80–320 comparisons, so the live rule stays (docs/simulation.md). |
+| COI / assignment graph | Existed, with components, bridges and a recusal what-if. |
+| Fatigue detection | Drift check existed. Time-per-review still can't be measured honestly (no `opened_at`). |
+| Playbook PDF | **Added** Save as PDF (print styles), instead of screenshot capture. |
+| Ranking convergence | **Added** a learning curve that works without timestamps, plus the real arrival curve when times exist (§3.12). |
+| OAuth sign-in | Existed (GitHub, Google, LinkedIn, X). |

@@ -52,10 +52,21 @@ export default async function Audit({
         title="Review trail"
         sub="Every setting change, assignment, review and publication for this event, in one append-only log where each entry is chained to the last by its hash."
         actions={
-          <a href={json} className={buttonClass("secondary", "sm")}>
-            <Icon name="file" size={13} />
-            Full log (JSON)
-          </a>
+          <>
+            <a
+              href="/api/v1/audit/checkpoint"
+              download="audit-checkpoint.json"
+              title="The chain's latest hash, signed by this instance. Anyone who keeps a copy can later detect a rewritten history."
+              className={buttonClass("secondary", "sm")}
+            >
+              <Icon name="shieldCheck" size={13} />
+              Signed checkpoint
+            </a>
+            <a href={json} className={buttonClass("secondary", "sm")}>
+              <Icon name="file" size={13} />
+              Full log (JSON)
+            </a>
+          </>
         }
       />
 

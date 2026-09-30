@@ -246,6 +246,57 @@ export interface Report {
   reviews: number;
   robustness?: Robustness;
   outliers: OutlierReview[] | null;
+  convergence?: Convergence;
+}
+
+export interface ConvergencePoint {
+  /** Share of each project's reviews kept in the refits. */
+  fraction: number;
+  reviews: number;
+  per_project: number;
+  tau_mean: number;
+  tau_low: number;
+  tau_high: number;
+  top_k_same: number;
+  winner_same: number;
+}
+
+export interface ArrivalPoint {
+  reviews: number;
+  tau: number;
+  top_k_same: boolean;
+}
+
+export interface Convergence {
+  top_n: number;
+  top_k: number;
+  subsamples: number;
+  curve: ConvergencePoint[] | null;
+  /** Only when write times can order the reviews (not for imported scores). */
+  arrival?: ArrivalPoint[] | null;
+  settled: boolean;
+  verdict: string;
+}
+
+export type CriterionSignal = "lenient" | "harsh" | "noise" | "low data";
+
+export interface CriterionCell {
+  judge: string;
+  criterion: string;
+  reviews: number;
+  raw: number;
+  lambda: number;
+  shrunk: number;
+  low: number;
+  high: number;
+  signal: CriterionSignal;
+}
+
+export interface CriterionLeniency {
+  criteria:
+    | { criterion: string; tau: number; sigma: number; flagged: number }[]
+    | null;
+  cells: CriterionCell[] | null;
 }
 
 export interface PairwiseRow {
@@ -255,6 +306,20 @@ export interface PairwiseRow {
   comparisons: number;
   rank: number;
   rank_dist: number[] | null;
+  /** Elo averaged over random orders of the same comparisons. */
+  elo: number;
+  elo_sd: number;
+  /** Rank under the Davidson tie model. */
+  davidson_rank: number;
+}
+
+export interface PairwiseTies {
+  ties: number;
+  comparisons: number;
+  nu: number;
+  nu_se: number;
+  even_tie_prob: number;
+  rank_agreement: number;
 }
 
 export interface VoteTally {
@@ -269,9 +334,12 @@ export interface Results {
   rows: ResultRow[] | null;
   judges: JudgeRow[] | null;
   pairwise: PairwiseRow[] | null;
+  pairwise_ties?: PairwiseTies;
   votes?: VoteTally[] | null;
   excluded: Project[] | null;
   published: boolean;
+  /** Organizers only. */
+  criterion_leniency?: CriterionLeniency;
 }
 
 export interface Ballot {
