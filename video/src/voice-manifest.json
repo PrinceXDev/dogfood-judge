@@ -1,0 +1,316 @@
+{
+  "voice": "en-IN-PrabhatNeural",
+  "rate": "+20%",
+  "lines": {
+    "intro-0": {
+      "key": "a32fa56f1e45",
+      "offset": 0.085,
+      "seconds": 1.21
+    },
+    "intro-1": {
+      "key": "81a984248ee4",
+      "offset": 0.126,
+      "seconds": 0.905
+    },
+    "intro-2": {
+      "key": "03fe5d130f57",
+      "offset": 0.089,
+      "seconds": 2.006
+    },
+    "intro-3": {
+      "key": "f6120f824417",
+      "offset": 0.081,
+      "seconds": 0.862
+    },
+    "intro-4": {
+      "key": "6f2dd366e310",
+      "offset": 0.075,
+      "seconds": 1.971
+    },
+    "intro-5": {
+      "key": "500f7540a17d",
+      "offset": 0.082,
+      "seconds": 3.391
+    },
+    "problem-0": {
+      "key": "fe1614a7e682",
+      "offset": 0.075,
+      "seconds": 3.456
+    },
+    "problem-1": {
+      "key": "e7c7634e4da3",
+      "offset": 0.075,
+      "seconds": 3.125
+    },
+    "problem-2": {
+      "key": "25f723fb362e",
+      "offset": 0.076,
+      "seconds": 2.542
+    },
+    "problem-3": {
+      "key": "bd69365d7a79",
+      "offset": 0.078,
+      "seconds": 3.93
+    },
+    "problem-4": {
+      "key": "df99ff7ee540",
+      "offset": 0.074,
+      "seconds": 5.648
+    },
+    "problem-5": {
+      "key": "bfada1e34843",
+      "offset": 0.075,
+      "seconds": 4.736
+    },
+    "problem-6": {
+      "key": "f29da8f0c17c",
+      "offset": 0.078,
+      "seconds": 2.773
+    },
+    "platform-0": {
+      "key": "4819cc54ea18",
+      "offset": 0.075,
+      "seconds": 5.543
+    },
+    "platform-1": {
+      "key": "579ab097b0a0",
+      "offset": 0.077,
+      "seconds": 5.8
+    },
+    "platform-2": {
+      "key": "d6b8dfccf5c4",
+      "offset": 0.075,
+      "seconds": 2.397
+    },
+    "isolation-0": {
+      "key": "88e35b9eddf8",
+      "offset": 0.077,
+      "seconds": 4.128
+    },
+    "isolation-1": {
+      "key": "e7651d852e65",
+      "offset": 0.07,
+      "seconds": 3.489
+    },
+    "isolation-2": {
+      "key": "8731ef77b941",
+      "offset": 0.084,
+      "seconds": 2.953
+    },
+    "isolation-3": {
+      "key": "967895056f54",
+      "offset": 0.071,
+      "seconds": 7.13
+    },
+    "normalization-0": {
+      "key": "3c01564b100d",
+      "offset": 0.076,
+      "seconds": 1.533
+    },
+    "normalization-1": {
+      "key": "556926f12c2b",
+      "offset": 0.077,
+      "seconds": 4.966
+    },
+    "normalization-2": {
+      "key": "6d893b64221b",
+      "offset": 0.076,
+      "seconds": 5.138
+    },
+    "normalization-3": {
+      "key": "63eb02645101",
+      "offset": 0.101,
+      "seconds": 4.746
+    },
+    "normalization-4": {
+      "key": "2729a0197f41",
+      "offset": 0.073,
+      "seconds": 5.958
+    },
+    "defensible-0": {
+      "key": "f43c2c2fc844",
+      "offset": 0.074,
+      "seconds": 3.001
+    },
+    "defensible-1": {
+      "key": "04abfb8e3f80",
+      "offset": 0.067,
+      "seconds": 1.347
+    },
+    "defensible-2": {
+      "key": "62fa04d67019",
+      "offset": 0.075,
+      "seconds": 5.246
+    },
+    "defensible-3": {
+      "key": "6782bc0511e4",
+      "offset": 0.067,
+      "seconds": 6.957
+    },
+    "defensible-4": {
+      "key": "db4d699abdfd",
+      "offset": 0.083,
+      "seconds": 4.622
+    },
+    "defensible-5": {
+      "key": "84d278b3f7f7",
+      "offset": 0.074,
+      "seconds": 6.643
+    },
+    "influential-0": {
+      "key": "433b198ea2db",
+      "offset": 0.076,
+      "seconds": 2.563
+    },
+    "influential-1": {
+      "key": "e4e1a99e5fac",
+      "offset": 0.081,
+      "seconds": 4.488
+    },
+    "influential-2": {
+      "key": "6e4341301271",
+      "offset": 0.067,
+      "seconds": 5.13
+    },
+    "influential-3": {
+      "key": "a51ef9cc8a93",
+      "offset": 0.076,
+      "seconds": 4.486
+    },
+    "tiebreak-0": {
+      "key": "585f4c3257d7",
+      "offset": 0.076,
+      "seconds": 3.804
+    },
+    "tiebreak-1": {
+      "key": "7795e0d997c5",
+      "offset": 0.075,
+      "seconds": 4.679
+    },
+    "tiebreak-2": {
+      "key": "83a09757655a",
+      "offset": 0.077,
+      "seconds": 4.813
+    },
+    "tiebreak-3": {
+      "key": "c6aba7ee1175",
+      "offset": 0.077,
+      "seconds": 3.877
+    },
+    "pairwise-0": {
+      "key": "ab59cdd8b3c5",
+      "offset": 0.09,
+      "seconds": 4.302
+    },
+    "pairwise-1": {
+      "key": "51cd89073664",
+      "offset": 0.077,
+      "seconds": 3.359
+    },
+    "pairwise-2": {
+      "key": "bddda73ef779",
+      "offset": 0.076,
+      "seconds": 3.845
+    },
+    "pairwise-3": {
+      "key": "027b39f3650a",
+      "offset": 0.079,
+      "seconds": 5.113
+    },
+    "verify-0": {
+      "key": "3149b0f0e632",
+      "offset": 0.092,
+      "seconds": 3.631
+    },
+    "verify-1": {
+      "key": "cbe91fa29b0a",
+      "offset": 0.16,
+      "seconds": 6.664
+    },
+    "verify-2": {
+      "key": "e9ec5fd1f8c6",
+      "offset": 0.074,
+      "seconds": 5.294
+    },
+    "verify-3": {
+      "key": "e80e55f61c1e",
+      "offset": 0.075,
+      "seconds": 0.756
+    },
+    "verify-4": {
+      "key": "0204cbdc708e",
+      "offset": 0.067,
+      "seconds": 2.853
+    },
+    "verify-5": {
+      "key": "a05d9a2116d9",
+      "offset": 0.077,
+      "seconds": 3.756
+    },
+    "verify-6": {
+      "key": "0abe72637da4",
+      "offset": 0.077,
+      "seconds": 4.416
+    },
+    "engineering-0": {
+      "key": "baf460ab1f7e",
+      "offset": 0.09,
+      "seconds": 1.938
+    },
+    "engineering-1": {
+      "key": "00210440caee",
+      "offset": 0.081,
+      "seconds": 5.55
+    },
+    "engineering-2": {
+      "key": "dc3c1bcc60f0",
+      "offset": 0.082,
+      "seconds": 5.565
+    },
+    "engineering-3": {
+      "key": "8df3f4be83dc",
+      "offset": 0.066,
+      "seconds": 8.194
+    },
+    "offline-0": {
+      "key": "f4259639b90c",
+      "offset": 0.075,
+      "seconds": 2.287
+    },
+    "offline-1": {
+      "key": "e33ae0bda7db",
+      "offset": 0.08,
+      "seconds": 2.621
+    },
+    "offline-2": {
+      "key": "6c3bed43f9c4",
+      "offset": 0.07,
+      "seconds": 5.709
+    },
+    "final-0": {
+      "key": "b976f0361d59",
+      "offset": 0.092,
+      "seconds": 2.15
+    },
+    "final-1": {
+      "key": "ce8ccc252483",
+      "offset": 0.086,
+      "seconds": 2.416
+    },
+    "final-2": {
+      "key": "9ca16f18a802",
+      "offset": 0.093,
+      "seconds": 1.585
+    },
+    "final-3": {
+      "key": "0e5f3d222915",
+      "offset": 0.093,
+      "seconds": 2.166
+    },
+    "final-4": {
+      "key": "d78246e5241d",
+      "offset": 0.072,
+      "seconds": 5.165
+    }
+  }
+}
