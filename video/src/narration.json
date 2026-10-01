@@ -1,0 +1,338 @@
+{
+  "voice": "en-IN-PrabhatNeural",
+  "rate": "+20%",
+  "scenes": [
+    {
+      "id": "intro",
+      "title": "The hook",
+      "lead": 0.6,
+      "tail": 0.8,
+      "lines": [
+        {
+          "say": "Forty-one projects.",
+          "pause": 0.25,
+          "text": "41 projects."
+        },
+        {
+          "say": "Thirty judges.",
+          "pause": 0.25,
+          "text": "30 judges."
+        },
+        {
+          "say": "One hundred and twenty-six reviews.",
+          "pause": 0.7,
+          "text": "126 reviews."
+        },
+        {
+          "say": "One winner.",
+          "pause": 0.9
+        },
+        {
+          "say": "But can you prove they deserved to win?",
+          "pause": 1.4
+        },
+        {
+          "say": "This is Dogfood Judge. Results you can defend."
+        }
+      ]
+    },
+    {
+      "id": "problem",
+      "title": "The problem",
+      "lead": 0.4,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Judge A loves everything. Nines and tens."
+        },
+        {
+          "say": "Judge B is tough. Fives and sixes."
+        },
+        {
+          "say": "Judge C gives almost everyone a seven."
+        },
+        {
+          "say": "The usual approach: average the scores, sort, declare a winner.",
+          "pause": 0.5
+        },
+        {
+          "say": "But judges don't use the scale the same way. Draw the harsh judge, and you lose on luck.",
+          "pause": 0.5
+        },
+        {
+          "say": "What if one review changed the winner? What if removing one judge flips it?",
+          "pause": 0.5
+        },
+        {
+          "say": "I built Dogfood Judge to answer those questions."
+        }
+      ]
+    },
+    {
+      "id": "platform",
+      "title": "The platform",
+      "lead": 0.3,
+      "tail": 0.5,
+      "lines": [
+        {
+          "say": "It's a complete, self-hosted hackathon platform: Go, SQLite, and Next.js."
+        },
+        {
+          "say": "Events, teams, submissions, assignments, scoring, analysis, publishing, and verification."
+        },
+        {
+          "say": "But the real work happens after scoring."
+        }
+      ]
+    },
+    {
+      "id": "isolation",
+      "title": "Secure judging",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Assignments respect tracks, conflicts of interest, and load balance."
+        },
+        {
+          "say": "Now, what if one judge asks for another judge's scores?",
+          "pause": 0.4
+        },
+        {
+          "say": "The backend refuses. Four oh three.",
+          "pause": 0.5,
+          "text": "The backend refuses. 403."
+        },
+        {
+          "say": "Isolation is enforced by the server, not hidden by the UI. A forty-four case authorization matrix proves it.",
+          "text": "Isolation is enforced by the server, not hidden by the UI. A 44-case authorization matrix proves it."
+        }
+      ]
+    },
+    {
+      "id": "normalization",
+      "title": "Normalization",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Now, the judging engine.",
+          "pause": 1.4
+        },
+        {
+          "say": "A raw score mixes two things: how good the project is, and how generous its judges were."
+        },
+        {
+          "say": "Dogfood models each judge's leniency and scale, using the overlap between judges."
+        },
+        {
+          "say": "Corrections are shrunk with empirical Bayes, so sparse judges aren't over-corrected.",
+          "pause": 0.5
+        },
+        {
+          "say": "And every rank comes with error bars: a rank interval, and the probability of a top three finish."
+        }
+      ]
+    },
+    {
+      "id": "defensible",
+      "title": "Is the winner defensible?",
+      "lead": 0.3,
+      "tail": 0.8,
+      "lines": [
+        {
+          "say": "Which brings us to the question every losing team asks.",
+          "pause": 0.3
+        },
+        {
+          "say": "Is the winner defensible?",
+          "pause": 0.6
+        },
+        {
+          "say": "Dogfood removes each judge in turn and refits the whole model. Thirty refits.",
+          "pause": 0.4,
+          "text": "Dogfood removes each judge in turn and refits the whole model. 30 refits."
+        },
+        {
+          "say": "On the sample event, first place survives twenty-four of thirty. Six specific judges can change the winner.",
+          "text": "On the sample event, first place survives 24 of 30. Six specific judges can change the winner."
+        },
+        {
+          "say": "The lead over second place? Zero point zero five standard errors.",
+          "pause": 0.4,
+          "text": "The lead over second place? 0.05 standard errors."
+        },
+        {
+          "say": "Other platforms print first place and move on. Dogfood says it's a coin flip, and how to settle it."
+        }
+      ]
+    },
+    {
+      "id": "influential",
+      "title": "The review that changed everything",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Next, reviews that disagree with everyone."
+        },
+        {
+          "say": "The model predicts every review. Reviews it can't explain get flagged.",
+          "pause": 0.3
+        },
+        {
+          "say": "In our test suite, one planted rogue review moved a project from nineteenth to twenty-ninth.",
+          "pause": 0.4,
+          "text": "In our test suite, one planted rogue review moved a project from #19 to #29."
+        },
+        {
+          "say": "It doesn't just flag a review. It measures what that review cost."
+        }
+      ]
+    },
+    {
+      "id": "tiebreak",
+      "title": "Smart tie-breaking",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "When the podium is close, reviewing everything again is waste."
+        },
+        {
+          "say": "Most projects are already settled, near zero or near one hundred percent.",
+          "text": "Most projects are already settled, near 0% or near 100%."
+        },
+        {
+          "say": "The tie-breaker round finds the coin flips at the prize line, and adds a judge to each."
+        },
+        {
+          "say": "Judge time goes where another review can actually change the outcome."
+        }
+      ]
+    },
+    {
+      "id": "pairwise",
+      "title": "Pairwise mode",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Sometimes a score isn't enough. So there's a pairwise mode."
+        },
+        {
+          "say": "A judge sees two projects. A, B, or tie."
+        },
+        {
+          "say": "The server picks the pairs adaptively, so no judge can steer them."
+        },
+        {
+          "say": "Verdicts are fitted with Bradley Terry, a regularizing prior, and real standard errors.",
+          "text": "Verdicts are fitted with Bradley–Terry, a regularizing prior, and real standard errors."
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "title": "Tamper-evident results",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "Fairness is half the story. The other half is trust.",
+          "pause": 0.4
+        },
+        {
+          "say": "Publishing produces a signed bundle: pseudonymized inputs, a fingerprint, an audit anchor, and the ranking."
+        },
+        {
+          "say": "Anyone can run dogfood verify results. It re-runs the exact engine, offline.",
+          "pause": 0.3,
+          "text": "Anyone can run dogfood verify-results. It re-runs the exact engine, offline."
+        },
+        {
+          "say": "Verified.",
+          "pause": 0.6
+        },
+        {
+          "say": "Now change a single score, and run it again.",
+          "pause": 0.5
+        },
+        {
+          "say": "Verification failed. The fingerprint no longer matches.",
+          "pause": 0.5
+        },
+        {
+          "say": "Judges can even verify their own reviews in the browser, with Merkle proofs."
+        }
+      ]
+    },
+    {
+      "id": "engineering",
+      "title": "Built to be tested",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "And it's all tested end to end."
+        },
+        {
+          "say": "The Go suite boots the real portal. Real SQLite, real HTTP, not mocks."
+        },
+        {
+          "say": "The organizers' checker passes tiers one and two. Ours covers three and four.",
+          "text": "The organizers' checker passes T1 and T2. Ours covers T3 and T4."
+        },
+        {
+          "say": "Authorization, deadlines, conflicts of interest, tamper detection, CSRF, CSV injection, rate limits, and signed webhooks."
+        }
+      ]
+    },
+    {
+      "id": "offline",
+      "title": "Offline and self-hosted",
+      "lead": 0.3,
+      "tail": 0.6,
+      "lines": [
+        {
+          "say": "And it all runs on your own machine."
+        },
+        {
+          "say": "One command. Docker compose up.",
+          "pause": 0.4,
+          "text": "One command. docker compose up."
+        },
+        {
+          "say": "After the first build, pull the network. It keeps running, with zero outbound requests."
+        }
+      ]
+    },
+    {
+      "id": "final",
+      "title": "The payoff",
+      "lead": 0.3,
+      "tail": 3.5,
+      "lines": [
+        {
+          "say": "So let's go back to that leaderboard.",
+          "pause": 0.3
+        },
+        {
+          "say": "This time, the winner comes with evidence.",
+          "pause": 3.2
+        },
+        {
+          "say": "Picking a winner is easy.",
+          "pause": 0.7
+        },
+        {
+          "say": "Proving the result is fair is harder.",
+          "pause": 0.8
+        },
+        {
+          "say": "I'm Prince Panchani. This is Dogfood Judge. Results you can defend."
+        }
+      ]
+    }
+  ]
+}

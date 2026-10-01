@@ -1,0 +1,247 @@
+1
+00:00:00,600 --> 00:00:01,833
+41 projects.
+
+2
+00:00:02,100 --> 00:00:03,033
+30 judges.
+
+3
+00:00:03,300 --> 00:00:05,333
+126 reviews.
+
+4
+00:00:06,033 --> 00:00:06,900
+One winner.
+
+5
+00:00:07,800 --> 00:00:09,800
+But can you prove they deserved to win?
+
+6
+00:00:11,200 --> 00:00:14,600
+This is Dogfood Judge. Results you can defend.
+
+7
+00:00:16,133 --> 00:00:19,600
+Judge A loves everything. Nines and tens.
+
+8
+00:00:19,933 --> 00:00:23,067
+Judge B is tough. Fives and sixes.
+
+9
+00:00:23,400 --> 00:00:25,967
+Judge C gives almost everyone a seven.
+
+10
+00:00:26,300 --> 00:00:30,233
+The usual approach: average the scores, sort, declare a winner.
+
+11
+00:00:30,733 --> 00:00:36,400
+But judges don't use the scale the same way. Draw the harsh judge, and you lose on luck.
+
+12
+00:00:36,900 --> 00:00:41,667
+What if one review changed the winner? What if removing one judge flips it?
+
+13
+00:00:42,167 --> 00:00:44,967
+I built Dogfood Judge to answer those questions.
+
+14
+00:00:46,200 --> 00:00:51,767
+It's a complete, self-hosted hackathon platform: Go, SQLite, and Next.js.
+
+15
+00:00:52,100 --> 00:00:57,900
+Events, teams, submissions, assignments, scoring, analysis, publishing, and verification.
+
+16
+00:00:58,233 --> 00:01:00,633
+But the real work happens after scoring.
+
+17
+00:01:01,767 --> 00:01:05,900
+Assignments respect tracks, conflicts of interest, and load balance.
+
+18
+00:01:06,233 --> 00:01:09,733
+Now, what if one judge asks for another judge's scores?
+
+19
+00:01:10,133 --> 00:01:13,100
+The backend refuses. 403.
+
+20
+00:01:13,600 --> 00:01:20,733
+Isolation is enforced by the server, not hidden by the UI. A 44-case authorization matrix proves it.
+
+21
+00:01:21,967 --> 00:01:23,500
+Now, the judging engine.
+
+22
+00:01:24,900 --> 00:01:29,867
+A raw score mixes two things: how good the project is, and how generous its judges were.
+
+23
+00:01:30,200 --> 00:01:35,367
+Dogfood models each judge's leniency and scale, using the overlap between judges.
+
+24
+00:01:35,700 --> 00:01:40,467
+Corrections are shrunk with empirical Bayes, so sparse judges aren't over-corrected.
+
+25
+00:01:40,967 --> 00:01:46,933
+And every rank comes with error bars: a rank interval, and the probability of a top three finish.
+
+26
+00:01:48,167 --> 00:01:51,200
+Which brings us to the question every losing team asks.
+
+27
+00:01:51,500 --> 00:01:52,867
+Is the winner defensible?
+
+28
+00:01:53,467 --> 00:01:58,733
+Dogfood removes each judge in turn and refits the whole model. 30 refits.
+
+29
+00:01:59,133 --> 00:02:06,100
+On the sample event, first place survives 24 of 30. Six specific judges can change the winner.
+
+30
+00:02:06,433 --> 00:02:11,067
+The lead over second place? 0.05 standard errors.
+
+31
+00:02:11,467 --> 00:02:18,133
+Other platforms print first place and move on. Dogfood says it's a coin flip, and how to settle it.
+
+32
+00:02:19,567 --> 00:02:22,133
+Next, reviews that disagree with everyone.
+
+33
+00:02:22,467 --> 00:02:26,967
+The model predicts every review. Reviews it can't explain get flagged.
+
+34
+00:02:27,267 --> 00:02:32,400
+In our test suite, one planted rogue review moved a project from #19 to #29.
+
+35
+00:02:32,800 --> 00:02:37,300
+It doesn't just flag a review. It measures what that review cost.
+
+36
+00:02:38,533 --> 00:02:42,367
+When the podium is close, reviewing everything again is waste.
+
+37
+00:02:42,700 --> 00:02:47,400
+Most projects are already settled, near 0% or near 100%.
+
+38
+00:02:47,733 --> 00:02:52,567
+The tie-breaker round finds the coin flips at the prize line, and adds a judge to each.
+
+39
+00:02:52,900 --> 00:02:56,800
+Judge time goes where another review can actually change the outcome.
+
+40
+00:02:58,033 --> 00:03:02,367
+Sometimes a score isn't enough. So there's a pairwise mode.
+
+41
+00:03:02,700 --> 00:03:06,067
+A judge sees two projects. A, B, or tie.
+
+42
+00:03:06,400 --> 00:03:10,267
+The server picks the pairs adaptively, so no judge can steer them.
+
+43
+00:03:10,600 --> 00:03:15,733
+Verdicts are fitted with Bradley–Terry, a regularizing prior, and real standard errors.
+
+44
+00:03:16,967 --> 00:03:20,600
+Fairness is half the story. The other half is trust.
+
+45
+00:03:21,000 --> 00:03:27,667
+Publishing produces a signed bundle: pseudonymized inputs, a fingerprint, an audit anchor, and the ranking.
+
+46
+00:03:28,000 --> 00:03:33,300
+Anyone can run dogfood verify-results. It re-runs the exact engine, offline.
+
+47
+00:03:33,600 --> 00:03:34,367
+Verified.
+
+48
+00:03:34,967 --> 00:03:37,833
+Now change a single score, and run it again.
+
+49
+00:03:38,333 --> 00:03:42,100
+Verification failed. The fingerprint no longer matches.
+
+50
+00:03:42,600 --> 00:03:47,033
+Judges can even verify their own reviews in the browser, with Merkle proofs.
+
+51
+00:03:48,267 --> 00:03:50,233
+And it's all tested end to end.
+
+52
+00:03:50,567 --> 00:03:56,133
+The Go suite boots the real portal. Real SQLite, real HTTP, not mocks.
+
+53
+00:03:56,467 --> 00:04:02,033
+The organizers' checker passes T1 and T2. Ours covers T3 and T4.
+
+54
+00:04:02,367 --> 00:04:10,567
+Authorization, deadlines, conflicts of interest, tamper detection, CSRF, CSV injection, rate limits, and signed webhooks.
+
+55
+00:04:11,800 --> 00:04:14,100
+And it all runs on your own machine.
+
+56
+00:04:14,433 --> 00:04:17,067
+One command. docker compose up.
+
+57
+00:04:17,467 --> 00:04:23,200
+After the first build, pull the network. It keeps running, with zero outbound requests.
+
+58
+00:04:24,433 --> 00:04:26,600
+So let's go back to that leaderboard.
+
+59
+00:04:26,900 --> 00:04:29,333
+This time, the winner comes with evidence.
+
+60
+00:04:32,533 --> 00:04:34,133
+Picking a winner is easy.
+
+61
+00:04:34,833 --> 00:04:37,000
+Proving the result is fair is harder.
+
+62
+00:04:37,800 --> 00:04:42,967
+I'm Prince Panchani. This is Dogfood Judge. Results you can defend.
